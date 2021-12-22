@@ -110,6 +110,7 @@ inline constexpr mpt::uchar TypePORTAUDIO_WASAPI [] = UL_("WASAPI");
 inline constexpr mpt::uchar TypePORTAUDIO_WDMKS  [] = UL_("WDM-KS");
 inline constexpr mpt::uchar TypePORTAUDIO_WMME   [] = UL_("MME");
 inline constexpr mpt::uchar TypePORTAUDIO_DS     [] = UL_("DS");
+inline constexpr mpt::uchar TypeREWIRE           [] = UL_("ReWire"); 
 
 typedef mpt::ustring Type;
 

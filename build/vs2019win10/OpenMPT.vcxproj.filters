@@ -46,9 +46,6 @@
     <Filter Include="soundbase">
       <UniqueIdentifier>{69D0CCEC-D53A-8163-1E79-32098A225FB8}</UniqueIdentifier>
     </Filter>
-    <Filter Include="sounddev">
-      <UniqueIdentifier>{8DE8B016-79B5-0B22-A2CE-F9C98EFA40B0}</UniqueIdentifier>
-    </Filter>
     <Filter Include="sounddsp">
       <UniqueIdentifier>{55EAB016-41B7-0B22-6AD0-F9C956FC40B0}</UniqueIdentifier>
     </Filter>
@@ -69,6 +66,15 @@
     </Filter>
     <Filter Include="unarchiver">
       <UniqueIdentifier>{DCBADFD6-C872-2124-317A-FA7F1D51BC14}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="mptrack\APC">
+      <UniqueIdentifier>{edb32d19-4b49-4e22-8a8e-8acf35d0fafb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sounddev">
+      <UniqueIdentifier>{8DE8B016-79B5-0B22-A2CE-F9C98EFA40B0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="mptrack\rewire">
+      <UniqueIdentifier>{6390ecbd-5e4c-4446-9ad2-10a6f9d6f887}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -636,9 +642,6 @@
     <ClInclude Include="..\..\sounddev\SoundDeviceUtilities.h">
       <Filter>sounddev</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\sounddev\SoundDeviceWaveout.h">
-      <Filter>sounddev</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\sounddsp\AGC.h">
       <Filter>sounddsp</Filter>
     </ClInclude>
@@ -899,6 +902,51 @@
     </ClInclude>
     <ClInclude Include="..\pch\PCH.h">
       <Filter>build\pch</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\sounddev\SoundDeviceReWire.h">
+      <Filter>sounddev</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\APC\APC40.h">
+      <Filter>mptrack\APC</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\APC\APC40Recorder.h">
+      <Filter>mptrack\APC</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\APC\APC40ControlMap.h">
+      <Filter>mptrack\APC</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\APC\WinEvent.h">
+      <Filter>mptrack\plugins</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\sounddev\SoundDeviceWaveout.h">
+      <Filter>sounddev</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\APC\WinSharedMem.h">
+      <Filter>mptrack\APC</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\rewire\MPTRewire.h">
+      <Filter>mptrack\rewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\rewire\MPTRewireDebugUtils.h">
+      <Filter>mptrack\rewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\rewire\MPTRewirePanel.h">
+      <Filter>mptrack\rewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\rewire\ReWire.h">
+      <Filter>mptrack\rewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\rewire\ReWireAPI.h">
+      <Filter>mptrack\rewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\rewire\ReWireDeviceAPI.h">
+      <Filter>mptrack\rewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\rewire\ReWirePanelAPI.h">
+      <Filter>mptrack\rewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrack\rewire\RWDEFAPI.h">
+      <Filter>mptrack\rewire</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -1705,6 +1753,51 @@
     </ClCompile>
     <ClCompile Include="..\pch\PCH.cpp">
       <Filter>build\pch</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\APC\APC.cpp">
+      <Filter>mptrack\APC</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\sounddev\SoundDeviceReWire.cpp">
+      <Filter>sounddev</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\APC\WinEvent.cpp">
+      <Filter>mptrack\APC</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\APC\APC40.cpp">
+      <Filter>mptrack\APC</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\APC\APC40InputRouter.cpp">
+      <Filter>mptrack\APC</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\APC\APC40Recorder.cpp">
+      <Filter>mptrack\APC</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\APC\APC40ControlMap.cpp">
+      <Filter>mptrack\APC</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\APC\WinSharedMem.cpp">
+      <Filter>mptrack\APC</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\rewire\MPTRewireDebugUtils.cpp">
+      <Filter>mptrack\rewire</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\rewire\MPTRewireDevice.cpp">
+      <Filter>mptrack\rewire</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\rewire\MPTRewirePanel.cpp">
+      <Filter>mptrack\rewire</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\rewire\ReWire.cpp">
+      <Filter>mptrack\rewire</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\rewire\ReWireAPI.cpp">
+      <Filter>mptrack\rewire</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\rewire\ReWireDeviceAPI.cpp">
+      <Filter>mptrack\rewire</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrack\rewire\ReWirePanelAPI.cpp">
+      <Filter>mptrack\rewire</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

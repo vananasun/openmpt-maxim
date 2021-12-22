@@ -36,6 +36,7 @@
 #include "../soundlib/plugins/PluginManager.h"
 #include "MPTrackWine.h"
 #include "MPTrackUtil.h"
+#include "APC/APC.h"
 
 // GDI+
 #define max(a,b) (((a) > (b)) ? (a) : (b))
@@ -982,6 +983,12 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 	// Load Midi Library
 	ImportMidiConfig(theApp.GetSettings(), {}, true);
 
+#ifdef MPT_WITH_APC
+	// Load APC40 MkII
+	m_apc40 = new APC40();
+#endif // MPT_WITH_APC
+
+
 	// Enable DDE Execute open
 	// requires m_pDocManager
 	EnableShellOpen();
@@ -993,7 +1000,11 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 	// requires TrackerSettings
 	SoundDevice::SysInfo sysInfo = SoundDevice::SysInfo::Current();
 	SoundDevice::AppInfo appInfo;
+#if defined(MPT_WITH_APC) || defined(MPT_WITH_REWIRE)
+	appInfo.SetName(U_("OpenMPT ReWireD"));
+#else
 	appInfo.SetName(U_("OpenMPT"));
+#endif
 	appInfo.SetHWND(*m_pMainWnd);
 	appInfo.BoostedThreadPriorityXP = TrackerSettings::Instance().SoundBoostedThreadPriority;
 	appInfo.BoostedThreadMMCSSClassVista = TrackerSettings::Instance().SoundBoostedThreadMMCSSClass;

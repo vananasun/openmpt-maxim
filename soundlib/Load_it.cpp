@@ -29,6 +29,10 @@
 #include <sstream>
 #include "../common/version.h"
 #include "ITTools.h"
+#ifdef MPT_WITH_APC
+#include "../mptrack/Mptrack.h"
+#include "../mptrack/APC/APC40.h"
+#endif
 
 
 OPENMPT_NAMESPACE_BEGIN
@@ -50,6 +54,7 @@ MPTM version history for cwtv-field in "IT" header (only for MPTM files!):
 0x88B -> 0x88C: Changed type in which tuning number is printed to file: size_t -> uint16.
 0x88A -> 0x88B: Changed order-to-pattern-index table type from uint8-array to vector<uint32>.
 */
+
 
 
 #ifndef MODPLUG_NO_FILESAVE
@@ -1274,6 +1279,12 @@ void CSoundFile::LoadMPTMProperties(FileReader &file, uint16 cwtv)
 		ssb.ReadItem(Patterns, FileIdPatterns, &ReadModPatterns);
 		mpt::Charset sequenceDefaultCharset = GetCharsetInternal();
 		ssb.ReadItem(Order, FileIdSequences, [sequenceDefaultCharset](std::istream &iStrm, ModSequenceSet &seq, std::size_t nSize){ return ReadModSequences(iStrm, seq, nSize, sequenceDefaultCharset); });
+#ifdef MPT_WITH_APC
+		ssb.ReadItem(*this, "APC", [](std::istream &iStrm, CSoundFile &csf, const std::size_t dummy){
+			MPT_UNREFERENCED_PARAMETER(dummy);
+			return csf.m_apc40ControlMap->read(iStrm, csf);
+		});
+#endif
 
 		if(ssb.GetStatus() & srlztn::SNT_FAILURE)
 		{
@@ -1899,6 +1910,12 @@ bool CSoundFile::SaveIT(std::ostream &f, const mpt::PathString &filename, bool c
 	if(needsMptPatSave)
 		ssb.WriteItem(Patterns, FileIdPatterns, &WriteModPatterns);
 	ssb.WriteItem(Order, FileIdSequences, &WriteModSequences);
+
+#ifdef MPT_WITH_APC
+	ssb.WriteItem(*this, "APC", [](std::ostream &oStrm, const CSoundFile &csf){
+		return csf.m_apc40ControlMap->write(oStrm, csf);
+	});
+#endif
 
 	ssb.FinishWrite();
 

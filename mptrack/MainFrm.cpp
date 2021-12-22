@@ -49,6 +49,13 @@
 #include "ProgressDialog.h"
 #include <HtmlHelp.h>
 #include <Dbt.h>  // device change messages
+#ifdef MPT_WITH_APC
+#include "APC/APC.h"
+#endif
+#ifdef MPT_WITH_REWIRE
+#include "../sounddev/SoundDeviceReWire.h"
+#endif
+
 
 
 #ifdef _DEBUG
@@ -62,6 +69,9 @@ OPENMPT_NAMESPACE_BEGIN
 
 #define TIMERID_GUI 1
 #define TIMERID_NOTIFY 2
+#ifdef MPT_WITH_APC
+#define TIMERID_APC    3
+#endif // MPT_WITH_APC
 
 #define MPTTIMER_PERIOD		200
 
@@ -217,6 +227,9 @@ void CMainFrame::Initialize()
 	// Setup timer
 	OnUpdateUser(NULL);
 	m_nTimer = SetTimer(TIMERID_GUI, MPTTIMER_PERIOD, NULL);
+#ifdef MPT_WITH_APC
+	m_nTimerAPC = SetTimer(TIMERID_APC, 20/*ms*/, NULL); // the lower, the less latency for knobs
+#endif // MPT_WITH_APC
 
 	// Setup Keyboard Hook
 	ghKbdHook = SetWindowsHookEx(WH_KEYBOARD, KeyboardProc, AfxGetInstanceHandle(), GetCurrentThreadId());
@@ -326,6 +339,12 @@ BOOL CMainFrame::DestroyWindow()
 		KillTimer(m_nTimer);
 		m_nTimer = 0;
 	}
+#ifdef MPT_WITH_APC
+	if (m_nTimerAPC) {
+		KillTimer(m_nTimerAPC);
+		m_nTimerAPC = 0;
+	}
+#endif // MPT_WITH_APC
 	if (shMidiIn) midiCloseDevice();
 	// Delete bitmaps
 	delete bmpNotes;
@@ -764,6 +783,7 @@ void CMainFrame::SoundSourceLockedReadPrepare(SoundDevice::TimeInfo timeInfo)
 template <typename Tsample>
 void CMainFrame::SoundSourceLockedReadImpl(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, Tsample *buffer, const Tsample *inputBuffer)
 {
+
 	MPT_TRACE_SCOPE();
 	MPT_ASSERT(InAudioThread());
 	OPENMPT_PROFILE_FUNCTION(Profiler::Audio);
@@ -773,9 +793,9 @@ void CMainFrame::SoundSourceLockedReadImpl(SoundDevice::BufferFormat bufferForma
 	SoundDevice::BufferIO<Tsample> bufferIO(buffer, inputBuffer, numFrames, m_Dither, bufferFormat);
 	StereoVuMeterSourceWrapper<Tsample> source(bufferIO, m_VUMeterInput);
 	StereoVuMeterTargetWrapper<Tsample> target(bufferIO, m_VUMeterOutput);
-	CSoundFile::samplecount_t renderedFrames = m_pSndFile->Read(framesToRender, target, source);
-	MPT_ASSERT(renderedFrames <= framesToRender);
-	CSoundFile::samplecount_t remainingFrames = framesToRender - renderedFrames;
+	CSoundFile::samplecount_t m_nRenderedFrames = m_pSndFile->Read(framesToRender, target, source);
+	MPT_ASSERT(m_nRenderedFrames <= framesToRender);
+	CSoundFile::samplecount_t remainingFrames = framesToRender - m_nRenderedFrames;
 	if(remainingFrames > 0)
 	{
 		// The sound device interface expects the whole buffer to be filled, always.
@@ -784,12 +804,14 @@ void CMainFrame::SoundSourceLockedReadImpl(SoundDevice::BufferFormat bufferForma
 		{
 			for(uint32 channel = 0; channel < bufferFormat.Channels; ++channel)
 			{
-				buffer[(renderedFrames * bufferFormat.Channels) + channel] = SC::sample_cast<Tsample>(static_cast<int16>(0));
+				// @TODO: try and remove this to see if lag repeats audio instead of stops (probably just master buffer)
+				buffer[(m_nRenderedFrames * bufferFormat.Channels) + channel] = SC::sample_cast<Tsample>(static_cast<int16>(0));
 			}
-			renderedFrames += 1;
+			m_nRenderedFrames += 1;
 			remainingFrames -= 1;
 		}
 	}
+
 }
 
 
@@ -883,11 +905,16 @@ bool CMainFrame::audioOpenDevice()
 	SoundDevice::Settings deviceSettings = TrackerSettings::Instance().GetSoundDeviceSettings(deviceIdentifier);
 	if(!gpSoundDevice->Open(deviceSettings))
 	{
+		//MPT_LOG(LogDebug, "MainFrm.cpp", MPT_UFORMAT("{}\n{}AAAA\n")(gpSoundDevice->GetDeviceInfo().GetDisplayName(), gpSoundDevice->GetDeviceInfo().GetIdentifier()));
 		if(!gpSoundDevice->IsAvailable())
 		{
 			Reporting::Error(MPT_UFORMAT("Unable to open sound device '{}': Device not available.")(gpSoundDevice->GetDeviceInfo().GetDisplayName()));
 		} else
 		{
+#ifdef MPT_WITH_REWIRE
+			// Don't show stupid double error boxes
+			if (U_("ReWire_526557697265").compare(gpSoundDevice->GetDeviceInfo().GetIdentifier()))
+#endif
 			Reporting::Error(MPT_UFORMAT("Unable to open sound device '{}'.")(gpSoundDevice->GetDeviceInfo().GetDisplayName()));
 		}
 		return false;
@@ -1810,6 +1837,15 @@ BOOL CMainFrame::SetupSoundCard(SoundDevice::Settings deviceSettings, SoundDevic
 		{
 			gpSoundDevice->Close();
 		}
+#ifdef MPT_WITH_REWIRE
+		if (SoundDevice::g_RewireRequestedSampleRate != 0)
+		{
+			if (!U_("ReWire_526557697265").compare(gpSoundDevice->GetDeviceInfo().GetIdentifier()))
+			{
+				deviceSettings.Samplerate = SoundDevice::g_RewireRequestedSampleRate;
+			}
+		}
+#endif
 		TrackerSettings::Instance().m_SoundSettingsStopMode = stoppedMode;
 		switch(stoppedMode)
 		{
@@ -2101,6 +2137,11 @@ void CMainFrame::OnTimer(UINT_PTR timerID)
 		case TIMERID_NOTIFY:
 			OnTimerNotify();
 			break;
+		#ifdef MPT_WITH_APC
+		case TIMERID_APC:
+			theApp.m_apc40->tick();
+			break;
+		#endif // MPT_WITH_APC
 	}
 }
 
@@ -2832,6 +2873,9 @@ void CMainFrame::OnToolbarUpdateIndicatorClick()
 
 
 #endif // MPT_ENABLE_UPDATE
+
+
+
 
 
 void CMainFrame::OnHelp()

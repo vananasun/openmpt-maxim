@@ -11,8 +11,8 @@
 
 #include "stdafx.h"
 
-#ifndef NO_REVERB
 #include "Reverb.h"
+#ifndef NO_REVERB
 #include "../soundlib/MixerLoops.h"
 
 #ifdef ENABLE_SSE2
@@ -75,6 +75,7 @@ static int32 mBToLinear(int32 scale, int32 value_mB)
 	return mpt::saturate_round<int32>(mBToLinear(value_mB) * scale);
 }
 
+#endif // NO_REVERB
 static constexpr std::pair<SNDMIX_REVERB_PROPERTIES, const char *> ReverbPresets[NUM_REVERBTYPES] =
 {
 	// Examples simulating General MIDI 2'musical' reverb presets
@@ -126,6 +127,7 @@ const SNDMIX_REVERB_PROPERTIES *GetReverbPreset(uint32 preset)
 {
 	return (preset < NUM_REVERBTYPES) ? &ReverbPresets[preset].first : nullptr;
 }
+#ifndef NO_REVERB
 
 //////////////////////////////////////////////////////////////////////////
 //

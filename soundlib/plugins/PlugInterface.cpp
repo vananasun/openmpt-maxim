@@ -605,6 +605,17 @@ void IMixPlugin::AutomateParameter(PlugParamIndex param)
 		modDoc->RecordParamChange(GetSlot(), param);
 	}
 
+#ifdef MPT_WITH_APC
+	if(APC40::Enabled)
+	{
+		// VST parameters are assignable to knobs when metronome button is enabled
+		if(m_SndFile.m_apc40ControlMap->isInAssignmentMode())
+			m_SndFile.m_apc40ControlMap->setTargetParam(m_nSlot, param);
+		else
+			m_SndFile.m_apc40ControlMap->setLEDFromVSTParam(this, param);
+	}
+#endif
+
 	modDoc->SendNotifyMessageToAllViews(WM_MOD_PLUGPARAMAUTOMATE, m_nSlot, param);
 
 	if(auto *vstEditor = GetEditor(); vstEditor && vstEditor->m_hWnd)

@@ -8,7 +8,6 @@
  * The OpenMPT source code is released under the BSD license. Read LICENSE for more details.
  */
 
-
 // FIXME:
 // - Playing samples backwards should reverse interpolation LUTs for interpolation modes
 //   with more than two taps since they're not symmetric. We might need separate LUTs
@@ -16,6 +15,11 @@
 // - Loop wraparound works pretty well in general, but not at the start of bidi samples.
 // - The loop lookahead stuff might still fail for samples with backward loops.
 
+
+#ifdef MPT_WITH_REWIRE
+#include "../sounddev/SoundDeviceReWire.h"
+#include "../mptrack/Mainfrm.h"
+#endif
 #include "stdafx.h"
 #include "Sndfile.h"
 #include "MixerLoops.h"
@@ -283,21 +287,40 @@ void CSoundFile::CreateStereoMix(int count)
 	if(!count)
 		return;
 
-	// Resetting sound buffer
-	StereoFill(MixSoundBuffer, count, m_dryROfsVol, m_dryLOfsVol);
-	if(m_MixerSettings.gnChannels > 2)
-		StereoFill(MixRearBuffer, count, m_surroundROfsVol, m_surroundLOfsVol);
+#ifdef MPT_WITH_REWIRE
+	// Get ReWire sound device (if it is currently selected)
+	SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(CMainFrame::GetMainFrame()->gpSoundDevice);
+	if(!pDev) // is ReWire NOT enabled?
+	{
+#endif
+		// Resetting sound buffer
+		StereoFill(MixSoundBuffer, count, m_dryROfsVol, m_dryLOfsVol);
+		if(m_MixerSettings.gnChannels > 2)
+			StereoFill(MixRearBuffer, count, m_surroundROfsVol, m_surroundLOfsVol);
+#ifdef MPT_WITH_REWIRE
+	} else
+	{
+		// Clear sample preview channel
+		int32 *pSamplePreviewBuf = &pDev->m_Panel->m_AudioBuffers[127][pDev->m_FramesDoneDoubled];
+		memset(pSamplePreviewBuf, 0, count * 2 * sizeof(mixsample_t));
+	}
+#endif
 
 	CHANNELINDEX nchmixed = 0;
 
 	const bool ITPingPongMode = m_playBehaviour[kITPingPongMode];
 
+
+
 	for(uint32 nChn = 0; nChn < m_nMixChannels; nChn++)
 	{
-		ModChannel &chn = m_PlayState.Chn[m_PlayState.ChnMix[nChn]];
+		CHANNELINDEX nActualChn = m_PlayState.ChnMix[nChn];
+		ModChannel &chn = m_PlayState.Chn[nActualChn];
 
 		if(!chn.pCurrentSample && !chn.nLOfs && !chn.nROfs)
+		{
 			continue;
+		}
 
 		pOfsR = &m_dryROfsVol;
 		pOfsL = &m_dryLOfsVol;
@@ -309,7 +332,41 @@ void CSoundFile::CreateStereoMix(int count)
 		if(chn.dwFlags[CHN_FILTER]) functionNdx |= MixFuncTable::ndxFilter;
 #endif
 
+
+		
+#ifdef MPT_WITH_REWIRE
+		// Instead of mixing everything into a single buffer, mix into an individual channel of the ReWire sound device
+		mixsample_t *pbuffer;
+		if(pDev)
+		{
+			// If this is a sample preview channel or a faded note
+			if (nActualChn >= m_nChannels)
+			{
+				// NNAs (faded nodes); These get mixed within their parent channels
+				if (chn.nMasterChn != 0)
+				{
+					pbuffer = &pDev->m_Panel->m_AudioBuffers[chn.nMasterChn - 1][pDev->m_FramesDoneDoubled];
+				} else // Sample preview; Will be mixed into last ReWire channel
+				{
+					pbuffer = &pDev->m_Panel->m_AudioBuffers[127][pDev->m_FramesDoneDoubled];
+					pDev->m_Panel->markChannelAsRendered(127);
+				}
+			} else // We are dealing with a regular sample channel
+			{
+				pbuffer = &pDev->m_Panel->m_AudioBuffers[nActualChn][pDev->m_FramesDoneDoubled];
+				pDev->m_Panel->markChannelAsRendered(nActualChn);
+			}
+		}
+		else
+		{
+			pbuffer = MixSoundBuffer;
+		}
+#else
 		mixsample_t *pbuffer = MixSoundBuffer;
+#endif
+
+
+
 #ifndef NO_REVERB
 		if(((m_MixerSettings.DSPMask & SNDDSP_REVERB) && !chn.dwFlags[CHN_NOREVERB]) || chn.dwFlags[CHN_REVERB])
 		{
@@ -317,7 +374,7 @@ void CSoundFile::CreateStereoMix(int count)
 			pOfsR = &m_Reverb.gnRvbROfsVol;
 			pOfsL = &m_Reverb.gnRvbLOfsVol;
 		}
-#endif
+#endif	
 		if(chn.dwFlags[CHN_SURROUND] && m_MixerSettings.gnChannels > 2)
 		{
 			pbuffer = MixRearBuffer;
@@ -348,18 +405,19 @@ void CSoundFile::CreateStereoMix(int count)
 #endif // NO_PLUGINS
 
 		MixLoopState mixLoopState(chn);
-
+		
 		////////////////////////////////////////////////////
 		CHANNELINDEX naddmix = 0;
 		int nsamples = count;
 		// Keep mixing this sample until the buffer is filled.
 		do
 		{
+
 			uint32 nrampsamples = nsamples;
 			int32 nSmpCount;
 			if(chn.nRampLength > 0)
 			{
-				if (nrampsamples > chn.nRampLength) nrampsamples = chn.nRampLength;
+				if(nrampsamples > chn.nRampLength) nrampsamples = chn.nRampLength;
 			}
 
 			if((nSmpCount = mixLoopState.GetSampleCount(chn, nrampsamples, ITPingPongMode)) <= 0)
@@ -419,6 +477,7 @@ void CSoundFile::CreateStereoMix(int count)
 				naddmix = 1;
 			}
 
+			
 			nsamples -= nSmpCount;
 			if (chn.nRampLength)
 			{
@@ -468,6 +527,8 @@ void CSoundFile::CreateStereoMix(int count)
 			}
 		} while(nsamples > 0);
 
+		
+
 		// Restore sample pointer in case it got changed through loop wrap-around
 		chn.pCurrentSample = mixLoopState.samplePointer;
 		nchmixed += naddmix;
@@ -478,9 +539,16 @@ void CSoundFile::CreateStereoMix(int count)
 			m_MixPlugins[nMixPlugin - 1].pMixPlugin->ResetSilence();
 		}
 #endif // NO_PLUGINS
+
+
+
+
+
 	}
 	m_nMixStat = std::max(m_nMixStat, nchmixed);
+
 }
+
 
 
 void CSoundFile::ProcessPlugins(uint32 nCount)
@@ -557,6 +625,13 @@ void CSoundFile::ProcessPlugins(uint32 nCount)
 
 	const bool positionChanged = HasPositionChanged();
 
+
+	
+#ifdef MPT_WITH_REWIRE
+	SoundDevice::CReWireDevice *dev = dynamic_cast<SoundDevice::CReWireDevice *>(CMainFrame::GetMainFrame()->gpSoundDevice);
+	PLUGINDEX rewirePluginCount = 0;
+#endif
+
 	// Process Plugins
 	for(PLUGINDEX plug = 0; plug < MAX_MIXPLUGINS; plug++)
 	{
@@ -589,10 +664,21 @@ void CSoundFile::ProcessPlugins(uint32 nCount)
 			float *plugInputL = pObject->m_mixBuffer.GetInputBuffer(0);
 			float *plugInputR = pObject->m_mixBuffer.GetInputBuffer(1);
 
+#ifdef MPT_WITH_REWIRE
+			if(dev)
+			{
+				//START CLEAR FLOAT BUFFER
+				// @TODO: optimize
+				memset(MixFloatBuffer[0], 0, MIXBUFFERSIZE * sizeof(float));
+				memset(MixFloatBuffer[1], 0, MIXBUFFERSIZE * sizeof(float));
+				//END CLEAR FLOAT BUFFER
+			}
+#endif
+
 			if (pMixL == plugInputL)
 			{
 				isMasterMix = true;
-				pMixL = MixFloatBuffer[0];
+				pMixL = MixFloatBuffer[0]; // @TODO: change this too
 				pMixR = MixFloatBuffer[1];
 			}
 			SNDMIXPLUGINSTATE &state = plugin.pMixPlugin->m_MixState;
@@ -702,10 +788,41 @@ void CSoundFile::ProcessPlugins(uint32 nCount)
 				}
 			}
 			state.dwFlags &= ~SNDMIXPLUGINSTATE::psfHasInput;
+
+
+
+
+#ifdef MPT_WITH_REWIRE
+			////////////////////////////////////////////////////////////////
+			//
+			// START REWIRE
+			//
+			////////////////////////////////////////////////////////////////
+			if(dev && rewirePluginCount < 63 && plug < 63)
+			{
+				int rewireChannelID = 64 + plug;
+				int32 *pBuf = &dev->m_Panel->m_AudioBuffers[rewireChannelID][dev->m_FramesDoneDoubled];
+				FloatToStereoMix(pMixL, pMixR, pBuf, nCount, FloatToInt);
+				dev->m_Panel->markChannelAsRendered(rewireChannelID);
+				rewirePluginCount++;
+			}
+			////////////////////////////////////////////////////////////////
+			//
+			// END REWIRE
+			//
+			////////////////////////////////////////////////////////////////
+#endif
+
+
+
 		}
 	}
 #ifdef MPT_INTMIXER
+#ifdef MPT_WITH_REWIRE
+	if(!dev) FloatToStereoMix(pMixL, pMixR, MixSoundBuffer, nCount, FloatToInt);
+#else
 	FloatToStereoMix(pMixL, pMixR, MixSoundBuffer, nCount, FloatToInt);
+#endif
 #else
 	InterleaveStereo(pMixL, pMixR, MixSoundBuffer, nCount);
 #endif // MPT_INTMIXER

@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="mptrewire">
+      <UniqueIdentifier>{647eb561-3666-4a15-879e-1f68d2a9f192}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\mptrewire\ReWire.c">
+      <Filter>mptrewire</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrewire\ReWireAPI.c">
+      <Filter>mptrewire</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mptrewire\ReWireDeviceAPI.c">
+      <Filter>mptrewire</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\mptrewire\ReWire.h">
+      <Filter>mptrewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrewire\ReWireAPI.h">
+      <Filter>mptrewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrewire\ReWireDeviceAPI.h">
+      <Filter>mptrewire</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\mptrewire\RWDEFAPI.h">
+      <Filter>mptrewire</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

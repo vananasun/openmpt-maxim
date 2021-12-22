@@ -1,0 +1,9 @@
+﻿  MPTRewireDebugUtils.cpp
+  MPTRewireDevice.cpp
+  ReWire.cpp
+  ReWireAPI.cpp
+  ReWireDeviceAPI.cpp
+  Generating Code...
+C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Microsoft\VC\v160\Microsoft.CppBuild.targets(1363,5): warning MSB8012: TargetPath(E:\dev\OpenMPT_APC40Mk2\openmpt-apc40mk2\build\vs2019win10\x64\Debug\MPTRewireDevice.dll) does not match the Linker's OutputFile property value (E:\dev\OpenMPT_APC40Mk2\openmpt-apc40mk2\bin\debug\vs2019-win10-static\amd64\MPTRewire.dll). This may cause your project to build incorrectly. To correct this, please make sure that $(OutDir), $(TargetName) and $(TargetExt) property values match the value specified in %(Link.OutputFile).
+C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Microsoft\VC\v160\Microsoft.CppBuild.targets(1365,5): warning MSB8012: TargetName(MPTRewireDevice) does not match the Linker's OutputFile property value (MPTRewire). This may cause your project to build incorrectly. To correct this, please make sure that $(OutDir), $(TargetName) and $(TargetExt) property values match the value specified in %(Link.OutputFile).
+  MPTRewireDevice.vcxproj -> E:\dev\OpenMPT_APC40Mk2\openmpt-apc40mk2\build\vs2019win10\x64\Debug\MPTRewireDevice.dll

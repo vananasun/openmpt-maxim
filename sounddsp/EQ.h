@@ -17,9 +17,9 @@
 
 OPENMPT_NAMESPACE_BEGIN
 
-#ifndef NO_EQ
-
 #define MAX_EQ_BANDS	6
+
+#ifndef NO_EQ
 
 typedef struct EQBANDSTRUCT_
 {

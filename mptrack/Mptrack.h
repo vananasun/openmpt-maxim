@@ -21,6 +21,9 @@
 #include "../common/ComponentManager.h"
 #include "../common/mptMutex.h"
 #include "../common/mptRandom.h"
+#ifdef MPT_WITH_APC
+#include "APC/APC40.h"
+#endif // MPT_WITH_APC
 
 OPENMPT_NAMESPACE_BEGIN
 
@@ -112,6 +115,10 @@ protected:
 
 public:
 	static std::vector<CDLSBank *> gpDLSBanks;
+
+#ifdef MPT_WITH_APC
+	APC40 *m_apc40;
+#endif // MPT_WITH_APC
 
 protected:
 	mpt::recursive_mutex_with_lock_count m_GlobalMutex;

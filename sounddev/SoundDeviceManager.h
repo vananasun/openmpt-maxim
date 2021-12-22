@@ -38,6 +38,9 @@ class ComponentDirectSound;
 class ComponentASIO;
 class ComponentPortAudio;
 class ComponentRtAudio;
+#ifdef MPT_WITH_REWIRE
+class ComponentReWire;
+#endif // MPT_WITH_REWIRE
 
 
 class Manager
@@ -79,6 +82,9 @@ private:
 #ifdef MPT_WITH_RTAUDIO
 	ComponentHandle<ComponentRtAudio> m_RtAudio;
 #endif // MPT_WITH_RTAUDIO
+#ifdef MPT_WITH_REWIRE
+	ComponentHandle<ComponentReWire> m_ReWire;
+#endif // MPT_WITH_REWIRE
 
 	std::vector<SoundDevice::Info> m_SoundDevices;
 	std::map<SoundDevice::Identifier, bool> m_DeviceUnavailable;

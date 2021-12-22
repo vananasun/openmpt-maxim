@@ -19,6 +19,7 @@
 #include "mod_specifications.h"
 #ifdef MODPLUG_TRACKER
 #include "../mptrack/Moddoc.h"
+#include "../mptrack/Mptrack.h"
 #endif // MODPLUG_TRACKER
 #include "tuning.h"
 #include "Tables.h"
@@ -26,6 +27,10 @@
 #include "plugins/PlugInterface.h"
 #include "OPL.h"
 #include "MIDIEvents.h"
+#ifdef MPT_WITH_REWIRE
+#include "../mptrack/Mainfrm.h"
+#include "../sounddev/SoundDeviceReWire.h"
+#endif
 
 OPENMPT_NAMESPACE_BEGIN
 
@@ -102,6 +107,7 @@ public:
 	// Increment playback position of sample and envelopes on a channel
 	void RenderChannel(CHANNELINDEX channel, uint32 tickDuration, uint32 portaStart = uint32_max)
 	{
+
 		ModChannel &chn = state->Chn[channel];
 		uint32 numTicks = chnSettings[channel].ticksToRender;
 		if(numTicks == IGNORE_CHANNEL || numTicks == 0 || (!chn.IsSamplePlaying() && !chnSettings[channel].incChanged) || chn.pModSample == nullptr)
@@ -164,7 +170,7 @@ public:
 					else
 						chn.m_CalculateFreq = false;
 				}
-				chn.increment = sndFile.GetChannelIncrement(chn, period, 0).first;
+				chn.increment = sndFile.GetChannelIncrement(chn, period, 0);
 				chnSettings[channel].incChanged = false;
 				inc = chn.increment * tickDuration;
 				if(chn.dwFlags[CHN_PINGPONGFLAG]) inc.Negate();
@@ -495,6 +501,8 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 					// ProTracker MODs with VBlank timing: All Fxx parameters set the tick count.
 					if(p->param != 0) SetSpeed(playState, p->param);
 				}
+
+
 				break;
 
 			case CMD_S3MCMDEX:
@@ -924,7 +932,7 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 					if(porta && memory.chnSettings[nChn].incChanged)
 					{
 						// If there's a portamento, the current channel increment mustn't be 0 in NoteChange()
-						chn.increment = GetChannelIncrement(chn, chn.nPeriod, 0).first;
+						chn.increment = GetChannelIncrement(chn, chn.nPeriod, 0);
 					}
 					int32 setPan = chn.nPan;
 					chn.nNewNote = chn.nLastNote;
@@ -1213,7 +1221,7 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 					}
 				}
 			}
-#endif // NO_PLUGINS
+#endif // m_nMusicTempo
 		} else if(adjustMode != eAdjustOnSuccess)
 		{
 			// Target not found (e.g. when jumping to a hidden sub song), reset global variables...
@@ -1950,15 +1958,10 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 			if(cutoff >= 0 && chn.dwFlags[CHN_ADLIB] && m_opl && channelHint != CHANNELINDEX_INVALID)
 				m_opl->Volume(channelHint, chn.nCutOff / 2u, true);
 		}
-
-		if(chn.dwFlags[CHN_ADLIB] && m_opl && channelHint != CHANNELINDEX_INVALID)
-		{
-			if(m_playBehaviour[kOPLNoteOffOnNoteChange])
-				m_opl->NoteOff(channelHint);
-			else if(m_playBehaviour[kOPLNoteStopWith0Hz])
-				m_opl->Frequency(channelHint, 0, true, false);
-		}
 	}
+
+	if(m_playBehaviour[kOPLNoteStopWith0Hz] && chn.dwFlags[CHN_ADLIB] && m_opl && channelHint != CHANNELINDEX_INVALID)
+		m_opl->Frequency(channelHint, 0, true, false);
 
 	// Special case for MPT
 	if (bManual) chn.dwFlags.reset(CHN_MUTE);
@@ -5797,6 +5800,16 @@ void CSoundFile::SetTempo(TEMPO param, bool setFromUI)
 		}
 		Limit(m_PlayState.m_nMusicTempo, tempoMin, tempoMax);
 	}
+
+#ifdef MPT_WITH_REWIRE
+	SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(CMainFrame::GetMainFrame()->gpSoundDevice);
+	if(pDev)
+	{
+
+		pDev->m_Panel->signalBPMChange(GetCurrentBPM());
+	}
+#endif
+
 }
 
 
@@ -6225,6 +6238,17 @@ IMixPlugin *CSoundFile::GetChannelInstrumentPlugin(CHANNELINDEX chn) const
 #ifdef MODPLUG_TRACKER
 void CSoundFile::HandlePatternTransitionEvents()
 {
+
+#ifdef MPT_WITH_REWIRE
+	//SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(CMainFrame::GetMainFrame()->gpSoundDevice);
+	//if(pDev)
+	//{
+	//	// @TODO: Figure out which one it is: At the end of the buffer, or at the start of the buffer.
+	//	// uint32 nFrames = pDev->m_FramesToRender - (pDev->m_FramesDoneDoubled >> 1);
+	//	//pDev->m_Panel->signalSync();
+	//}
+#endif
+
 	// MPT sequence override
 	if(m_PlayState.m_nSeqOverride != ORDERINDEX_INVALID && m_PlayState.m_nSeqOverride < Order().size())
 	{
@@ -6246,8 +6270,16 @@ void CSoundFile::HandlePatternTransitionEvents()
 				GetpModDoc()->MuteChannel(chan, !GetpModDoc()->IsChannelMuted(chan));
 			}
 			m_bChannelMuteTogglePending[chan] = false;
+
+#ifdef MPT_WITH_APC
+			if (APC40::Enabled)
+			{
+				theApp.m_apc40->m_api->setTrackRecord(theApp.m_apc40->channelToTrackIndex(chan), 0);
+			}
+#endif // MPT_WITH_APC
 		}
 	}
+
 }
 #endif // MODPLUG_TRACKER
 

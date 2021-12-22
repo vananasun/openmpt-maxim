@@ -613,10 +613,12 @@ TrackerSettings::TrackerSettings(SettingsContainer &conf)
 	{
 		MixerMaxChannels = MixerSettings().m_nMaxMixChannels;  // reset to default on update because we removed the setting in the GUI
 	}
+#ifndef NO_DSP
 	if(storedVersion < MPT_V("1.29.00.20"))
 	{
 		MixerDSPMask = MixerDSPMask & ~SNDDSP_BITCRUSH;
 	}
+#endif
 
 	// Misc
 	if(defaultModType == MOD_TYPE_NONE)

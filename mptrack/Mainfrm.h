@@ -300,6 +300,9 @@ protected:
 	HWND m_hWndMidi = nullptr;
 	CSoundFile::samplecount_t m_dwTimeSec = 0;
 	UINT_PTR m_nTimer = 0;
+#ifdef MPT_WITH_APC
+	UINT_PTR m_nTimerAPC = 0;
+#endif // MPT_WITH_APC
 	UINT m_nAvgMixChn = 0, m_nMixChn = 0;
 	// Misc
 	class COptionsSoundcard *m_SoundCardOptionsDialog = nullptr;
@@ -548,6 +551,9 @@ protected:
 	afx_msg LRESULT OnUpdateCheckSuccess(WPARAM wparam, LPARAM lparam);
 	afx_msg void OnToolbarUpdateIndicatorClick();
 #endif // MPT_ENABLE_UPDATE
+#ifdef MPT_WITH_REWIRE
+	afx_msg LRESULT OnRewireUpdateMixerFreq(WPARAM wparam, LPARAM lparam);
+#endif
 	afx_msg void OnHelp();
 	afx_msg BOOL OnDeviceChange(UINT nEventType, DWORD_PTR dwData);
 	afx_msg void OnDropFiles(HDROP hDropInfo);

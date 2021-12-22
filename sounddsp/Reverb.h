@@ -195,6 +195,8 @@ private:
 };
 
 
+#endif // NO_REVERB
+
 /////////////////////////////////////////////////////////////////////////////////
 //
 // I3DL2 reverb presets
@@ -222,5 +224,3 @@ mpt::ustring GetReverbPresetName(uint32 preset);
 const SNDMIX_REVERB_PROPERTIES *GetReverbPreset(uint32 preset);
 
 OPENMPT_NAMESPACE_END
-
-#endif // NO_REVERB

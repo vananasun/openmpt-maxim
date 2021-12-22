@@ -1344,7 +1344,9 @@ BOOL COptionsPlayer::OnInitDialog()
 {
 	CPropertyPage::OnInitDialog();
 
+	#pragma warning(disable:189)
 	uint32 dwQuality = TrackerSettings::Instance().MixerDSPMask;
+	#pragma warning(default:189)
 
 #ifndef NO_EQ
 	for (UINT i = 0; i < MAX_EQ_BANDS; i++)
@@ -1387,7 +1389,7 @@ BOOL COptionsPlayer::OnInitDialog()
 	m_SbBitCrushBits.SetRange(1, 24);
 	m_SbBitCrushBits.SetPos(TrackerSettings::Instance().m_BitCrushSettings.m_Bits);
 #else
-	m_SbBitCurshBits.EnableWindow(FALSE);
+	m_SbBitCrushBits.EnableWindow(FALSE);
 #endif
 
 #ifndef NO_DSP
@@ -1480,8 +1482,10 @@ void COptionsPlayer::OnHScroll(UINT nSBCode, UINT, CScrollBar *psb)
 void COptionsPlayer::OnOK()
 {
 	DWORD dwQuality = 0;
-
+	
+	#pragma warning(disable:189)
 	DWORD dwQualityMask = 0;
+	#pragma warning(default:189)
 
 #ifndef NO_DSP
 	dwQualityMask |= SNDDSP_MEGABASS;

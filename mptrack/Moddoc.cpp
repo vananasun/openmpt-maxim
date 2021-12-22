@@ -47,6 +47,13 @@
 #ifndef NO_PLUGINS
 #include "AbstractVstEditor.h"
 #endif
+#ifdef MPT_WITH_REWIRE
+#include "../sounddev/SoundDeviceReWire.h"
+#include "../mptrack/Mainfrm.h"
+#endif
+#ifdef MPT_WITH_APC
+#include "../mptrack/APC/APC.h"
+#endif
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -180,6 +187,10 @@ BOOL CModDoc::OnNewDocument()
 	ReinitRecordState();
 	InitializeMod();
 	SetModified(false);
+
+#ifdef MPT_WITH_APC
+	if(APC40::Enabled) theApp.m_apc40->onNewDocument(m_SndFile);
+#endif
 	return TRUE;
 }
 
@@ -285,6 +296,22 @@ BOOL CModDoc::OnOpenDocument(LPCTSTR lpszPathName)
 			break;
 		}
 	}
+
+#ifdef MPT_WITH_REWIRE
+	SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(CMainFrame::GetMainFrame()->gpSoundDevice);
+	if(pDev)
+	{
+		pDev->m_Panel->signalBPMChange(m_SndFile.GetCurrentBPM());
+	}
+#endif
+
+#ifdef MPT_WITH_APC
+	if(APC40::Enabled)
+	{
+		theApp.m_apc40->onOpenDocument(m_SndFile);
+	}
+#endif // MPT_WITH_APC
+
 
 	return TRUE;
 }
@@ -413,6 +440,9 @@ void CModDoc::OnCloseDocument()
 	CMainFrame *pMainFrm = CMainFrame::GetMainFrame();
 	if(pMainFrm) pMainFrm->OnDocumentClosed(this);
 	CDocument::OnCloseDocument();
+#ifdef MPT_WITH_APC
+	if (APC40::Enabled) theApp.m_apc40->m_api->resetDisplay();
+#endif
 }
 
 
@@ -1191,6 +1221,11 @@ bool CModDoc::MuteChannel(CHANNELINDEX nChn, bool doMute)
 		SetModified();
 	}
 
+	
+#ifdef MPT_WITH_APC
+	if(APC40::Enabled) theApp.m_apc40->setChannelLED(this, nChn, !doMute);
+#endif
+
 	return success;
 }
 
@@ -1260,6 +1295,15 @@ bool CModDoc::SoloChannel(CHANNELINDEX nChn, bool bSolo)
 	if (nChn >= m_SndFile.m_nChannels) return false;
 	if (MuteToggleModifiesDocument()) SetModified();
 	m_SndFile.ChnSettings[nChn].dwFlags.set(CHN_SOLO, bSolo);
+#ifdef MPT_WITH_APC
+	if (APC40::Enabled)
+	{
+		theApp.m_apc40->m_api->setTrackSolo(
+			theApp.m_apc40->channelToTrackIndex(nChn),
+			bSolo
+		);
+	}
+#endif
 	return true;
 }
 
@@ -2065,6 +2109,15 @@ void CModDoc::OnPlayerPlay()
 
 		m_SndFile.m_SongFlags.reset(SONG_STEP | SONG_PAUSED | SONG_PATTERNLOOP);
 		pMainFrm->PlayMod(this);
+
+#ifdef MPT_WITH_REWIRE
+		SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(pMainFrm->gpSoundDevice);
+		if(pDev)
+		{
+			pDev->m_Panel->signalPlayAndSync(m_SndFile.GetCurrentBPM());
+		}
+#endif
+
 	}
 }
 
@@ -2111,6 +2164,20 @@ void CModDoc::OnPlayerPause()
 		{
 			pMainFrm->PauseMod();
 		}
+
+
+#ifdef MPT_WITH_REWIRE
+		SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(pMainFrm->gpSoundDevice);
+		if(pDev)
+		{
+			// pDev->m_Panel->signalStop();
+		}
+#endif
+
+#ifdef MPT_WITH_APC
+		if(APC40::Enabled) theApp.m_apc40->onStop();
+#endif
+
 	}
 }
 
@@ -2119,6 +2186,18 @@ void CModDoc::OnPlayerStop()
 {
 	CMainFrame *pMainFrm = CMainFrame::GetMainFrame();
 	if (pMainFrm) pMainFrm->StopMod();
+
+#ifdef MPT_WITH_REWIRE
+	SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(pMainFrm->gpSoundDevice);
+	if(pDev)
+	{
+		// pDev->m_Panel->signalStop();
+	}
+#endif
+
+#ifdef MPT_WITH_APC
+	if(APC40::Enabled) theApp.m_apc40->onStop();
+#endif
 }
 
 
@@ -2132,7 +2211,7 @@ void CModDoc::OnPlayerPlayFromStart()
 		{
 			//User has sent play song command: set loop pattern checkbox to false.
 			pChildFrm->SendViewMessage(VIEWMSG_PATTERNLOOP, 0);
-		}
+		}	
 
 		pMainFrm->PauseMod();
 		CriticalSection cs;
@@ -2145,6 +2224,23 @@ void CModDoc::OnPlayerPlayFromStart()
 		cs.Leave();
 
 		pMainFrm->PlayMod(this);
+
+
+#ifdef MPT_WITH_REWIRE
+		SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(pMainFrm->gpSoundDevice);
+		if(pDev)
+		{
+			pDev->m_Panel->signalPlayAndSync(m_SndFile.GetCurrentBPM());
+		}
+#endif
+
+#ifdef MPT_WITH_APC
+		if (APC40::Enabled)
+		{
+			theApp.m_apc40->onPlay();
+		}
+#endif
+
 	}
 }
 
@@ -2437,6 +2533,22 @@ void CModDoc::OnPatternRestart(bool loop)
 			SetFollowWnd(pChildFrm->GetHwndView());
 			pMainFrm->PlayMod(this); //rewbs.fix2977
 		}
+
+		
+#ifdef MPT_WITH_REWIRE
+		SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(pMainFrm->gpSoundDevice);
+		if(pDev)
+		{  // is ReWire enabled?
+			pDev->m_Panel->signalPlayAndSync(m_SndFile.GetCurrentBPM());
+			// pDev->m_Panel->signalReposition(m_SndFile.GetCurrentBPM(), pDev->m_FramesToRender);
+		}
+#endif
+
+#ifdef MPT_WITH_APC
+		if(APC40::Enabled) theApp.m_apc40->m_api->setPlay(true);
+#endif  // MPT_WITH_APC
+
+
 	}
 	//SwitchToView();
 }
@@ -2487,8 +2599,25 @@ void CModDoc::OnPatternPlay()
 			SetFollowWnd(pChildFrm->GetHwndView());
 			pMainFrm->PlayMod(this);  //rewbs.fix2977
 		}
+
+
+#ifdef MPT_WITH_REWIRE
+		SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(pMainFrm->gpSoundDevice);
+		if(pDev)
+		{  // is ReWire enabled?
+			pDev->m_Panel->signalPlayAndSync(m_SndFile.GetCurrentBPM());
+		}
+#endif
+
+
 	}
 	//SwitchToView();
+
+
+	#ifdef MPT_WITH_APC
+	if(APC40::Enabled) theApp.m_apc40->m_api->setPlay(true);
+	#endif // MPT_WITH_APC
+
 
 }
 
@@ -2540,8 +2669,25 @@ void CModDoc::OnPatternPlayNoLoop()
 			SetFollowWnd(pChildFrm->GetHwndView());
 			pMainFrm->PlayMod(this);  //rewbs.fix2977
 		}
+
+
+#ifdef MPT_WITH_REWIRE
+		SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(pMainFrm->gpSoundDevice);
+		if(pDev)
+		{  // is ReWire enabled?
+			pDev->m_Panel->signalPlayAndSync(m_SndFile.GetCurrentBPM());
+		}
+#endif
+
+
 	}
 	//SwitchToView();
+
+	
+	#ifdef MPT_WITH_APC
+	if(APC40::Enabled) theApp.m_apc40->m_api->setPlay(true);
+	#endif // MPT_WITH_APC
+
 }
 
 

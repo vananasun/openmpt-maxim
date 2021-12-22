@@ -239,6 +239,7 @@ public:
 	void UpdateColors();
 
 	CString GetCursorDescription() const;
+	PatternCursor &GetCursor() { return m_Cursor; };
 
 	int GetXScrollPos() const { return m_nXScroll; }
 	int GetYScrollPos() const { return m_nYScroll; }
@@ -470,7 +471,11 @@ protected:
 	afx_msg LRESULT OnUpdatePosition(WPARAM nOrd, LPARAM nRow);
 	afx_msg LRESULT OnMidiMsg(WPARAM, LPARAM);
 	afx_msg LRESULT OnRecordPlugParamChange(WPARAM, LPARAM);
+
+public:
 	afx_msg LRESULT OnCustomKeyMsg(WPARAM, LPARAM);
+
+protected:
 	afx_msg void OnClearSelectionFromMenu();
 	afx_msg void OnSelectInstrument(UINT nid);
 	afx_msg void OnSelectPCNoteParam(UINT nid);

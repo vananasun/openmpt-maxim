@@ -13,9 +13,11 @@
 
 #include "SoundDeviceManager.h"
 #include "SoundDevice.h"
-
 #include "SoundDeviceASIO.h"
 #include "SoundDeviceDirectSound.h"
+#if defined(MPT_WITH_REWIRE)
+#include "SoundDeviceReWire.h"
+#endif // MPT_WITH_REWIRE
 #include "SoundDevicePortAudio.h"
 #include "SoundDeviceRtAudio.h"
 #include "SoundDeviceWaveout.h"
@@ -155,6 +157,13 @@ void Manager::ReEnumerate()
 		EnumerateDevices<CRtAudioDevice>(GetSysInfo());
 	}
 #endif // MPT_WITH_RTAUDIO
+
+#ifdef MPT_WITH_REWIRE
+	if(IsComponentAvailable(m_ReWire))
+	{
+		EnumerateDevices<CReWireDevice>(GetSysInfo());
+	}
+#endif // MPT_WITH_REWIRE
 
 #ifndef MPT_BUILD_WINESUPPORT
 	{

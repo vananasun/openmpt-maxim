@@ -23,6 +23,14 @@
 #endif // NO_PLUGINS
 #include "OPL.h"
 
+
+#ifdef MPT_WITH_REWIRE
+#include "../sounddev/SoundDeviceReWire.h"
+#include "../mptrack/Mainfrm.h"
+#endif
+
+
+
 OPENMPT_NAMESPACE_BEGIN
 
 // Log tables for pre-amp
@@ -193,13 +201,14 @@ void CSoundFile::ProcessInputChannels(IAudioSource &source, std::size_t countChu
 	{
 		std::fill(&(MixInputBuffer[channel][0]), &(MixInputBuffer[channel][countChunk]), 0);
 	}
-	mixsample_t * buffers[NUMMIXINPUTBUFFERS];
+	mixsample_t *buffers[NUMMIXINPUTBUFFERS];
 	for(std::size_t channel = 0; channel < NUMMIXINPUTBUFFERS; ++channel)
 	{
 		buffers[channel] = MixInputBuffer[channel];
 	}
 	source.FillCallback(buffers, m_MixerSettings.NumInputChannels, countChunk);
 }
+
 
 
 CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget &target, IAudioSource &source)
@@ -220,6 +229,51 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 
 	samplecount_t countRendered = 0;
 	samplecount_t countToRender = count;
+
+
+#ifdef MPT_WITH_REWIRE
+	SoundDevice::CReWireDevice *dev = dynamic_cast<SoundDevice::CReWireDevice *>(CMainFrame::GetMainFrame()->gpSoundDevice);
+	if (dev)
+	{
+		// Empty all the channel buffers.
+		for(int nChn = 0; nChn < m_nChannels; nChn++)
+		{
+			mixsample_t *pchannel = dev->m_Panel->m_AudioBuffers[nChn];
+			memset(pchannel, 0, static_cast<size_t>(count) * 2 * sizeof(mixsample_t));
+		}
+
+		// Reset position if we are gonna sync.
+		// NOTE: Currently we assume fTickofBatchStart15360PPQ being 0, so we don't need any calculations. :)
+		if (dev->m_Panel->m_GonnaSync)
+		{
+			//MPT_LOG(LogDebug, "Sndmix", MPT_UFORMAT("Sync pos in 15360 PPQ: {}")(dev->m_Panel->m_SyncPos15360PPQ));
+
+			//// Reposition with sample accuracy
+			//float posInSamples = MPTRewire::Ticks2Samples((float)dev->m_Panel->m_SyncPos15360PPQ, (float)GetCurrentBPM(), (float)GetSampleRate());
+			//float posInRows = posInSamples / m_PlayState.m_nSamplesPerTick / m_PlayState.TicksOnRow();
+			//m_PlayState.m_nRow = m_PlayState.m_nNextRow = static_cast<ROWINDEX>(posInRows);
+			//m_PlayState.m_nNextRow++;
+			//float samplesLeft = (posInRows - m_PlayState.m_nRow) * m_PlayState.TicksOnRow() * m_PlayState.m_nSamplesPerTick;
+			//while (samplesLeft > m_PlayState.m_nSamplesPerTick)
+			//{
+			//	samplesLeft -= m_PlayState.m_nSamplesPerTick;
+			//}
+			//m_PlayState.m_nBufferCount = m_PlayState.m_nSamplesPerTick - static_cast<samplecount_t>(samplesLeft); // @TODO: From samples left per row to samples left per tick
+			
+			m_PlayState.m_nRow = 0;
+			m_PlayState.m_nNextRow = 0;
+			m_PlayState.m_nBufferCount = 0;
+			m_PlayState.m_nTickCount = TICKS_ROW_FINISHED;
+			m_PlayState.m_nPatternDelay = 0;
+			m_PlayState.m_nFrameDelay = 0;
+			m_PlayState.m_nextPatStartRow = 0;
+
+			dev->m_Panel->m_GonnaSync = false;
+		}
+
+	}
+#endif
+
 
 	while(!m_SongFlags[SONG_ENDREACHED] && countToRender > 0)
 	{
@@ -289,7 +343,9 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 
 		MPT_ASSERT(m_PlayState.m_nBufferCount > 0); // assert that we have actually something to do
 
+	
 		const samplecount_t countChunk = std::min({ static_cast<samplecount_t>(MIXBUFFERSIZE), static_cast<samplecount_t>(m_PlayState.m_nBufferCount), static_cast<samplecount_t>(countToRender) });
+
 
 		if(m_MixerSettings.NumInputChannels > 0)
 		{
@@ -300,7 +356,21 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 
 		if(m_opl)
 		{
-			m_opl->Mix(MixSoundBuffer, countChunk, m_OPLVolumeFactor * m_nVSTiVolume / 48);
+#ifdef MPT_WITH_REWIRE
+			if(dev)
+			{
+				mixsample_t *pbuffer = &dev->m_Panel->m_AudioBuffers[126][dev->m_FramesDoneDoubled];
+				memset(pbuffer, 0, countChunk * 2 * sizeof(mixsample_t));
+
+				m_opl->Mix(pbuffer, countChunk, m_OPLVolumeFactor * m_nVSTiVolume / 48);
+				dev->m_Panel->markChannelAsRendered(126);
+			} else
+			{
+				m_opl->Mix(MixSoundBuffer, countChunk, m_OPLVolumeFactor * m_nVSTiVolume / 48);
+			}
+#else
+		m_opl->Mix(MixSoundBuffer, countChunk, m_OPLVolumeFactor * m_nVSTiVolume / 48);
+#endif
 		}
 
 		#ifndef NO_REVERB
@@ -336,8 +406,20 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 		{
 			InterleaveFrontRear(MixSoundBuffer, MixRearBuffer, countChunk);
 		}
-
-		target.DataCallback(MixSoundBuffer, m_MixerSettings.gnChannels, countChunk);
+		 
+#ifdef MPT_WITH_REWIRE
+		// Dither when not ReWire'd
+		if (!dev)
+		{
+#endif
+			target.DataCallback(MixSoundBuffer, m_MixerSettings.gnChannels, countChunk);
+#ifdef MPT_WITH_REWIRE
+		} else
+		{
+			// Increment rendered frame count (doubled because of ease of array access)
+			dev->m_FramesDoneDoubled += countChunk * 2;
+		}
+#endif
 
 		// Buffer ready
 		countRendered += countChunk;
@@ -363,7 +445,6 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 	}
 
 	// mix done
-
 	return countRendered;
 
 }
@@ -417,6 +498,7 @@ void CSoundFile::ProcessDSP(uint32 countChunk)
 
 bool CSoundFile::ProcessRow()
 {
+
 	while(++m_PlayState.m_nTickCount >= m_PlayState.TicksOnRow())
 	{
 		const auto [ignoreRow, patternTransition] = NextRow(m_PlayState, m_SongFlags[SONG_BREAKTOROW]);
@@ -733,6 +815,32 @@ bool CSoundFile::ProcessRow()
 	{
 		m_SongFlags.set(SONG_FIRSTTICK);
 		m_SongFlags.reset(SONG_BREAKTOROW);
+
+#ifdef MPT_WITH_APC
+	// Pattern row display
+	if (APC40::Enabled)
+	{
+		uint32 nRowsPerLed = Patterns[m_PlayState.m_nPattern].GetNumRows() / 8;
+		uint32 nLeds = m_PlayState.m_nRow / nRowsPerLed;
+		if (theApp.m_apc40->m_rowLedsIndex != nLeds)
+		{
+			if (nLeds < theApp.m_apc40->m_rowLedsIndex) // pattern transition happened
+			{
+				theApp.m_apc40->m_api->setClipStop(0, true);
+				for (uint32 i = 1; i < 8; i++)
+				{
+					theApp.m_apc40->m_api->setClipStop(i, false);
+				}
+			}
+			else
+			{
+				theApp.m_apc40->m_api->setClipStop(nLeds, true);
+			}
+			theApp.m_apc40->m_rowLedsIndex = nLeds;
+		}
+	}
+#endif // MPT_WITH_APC
+
 	}
 
 	// Update Effects
@@ -1984,8 +2092,7 @@ void CSoundFile::ProcessRamping(ModChannel &chn) const
 }
 
 
-// Returns channel increment and frequency with FREQ_FRACBITS fractional bits
-std::pair<SamplePosition, uint32> CSoundFile::GetChannelIncrement(const ModChannel &chn, uint32 period, int periodFrac) const
+SamplePosition CSoundFile::GetChannelIncrement(const ModChannel &chn, uint32 period, int periodFrac) const
 {
 	uint32 freq;
 	if(!chn.HasCustomTuning())
@@ -2011,7 +2118,7 @@ std::pair<SamplePosition, uint32> CSoundFile::GetChannelIncrement(const ModChann
 
 	// Avoid increment to overflow and become negative with unrealisticly high frequencies.
 	LimitMax(freq, uint32(int32_max));
-	return {SamplePosition::Ratio(freq, m_MixerSettings.gdwMixingFreq << FREQ_FRACBITS), freq};
+	return SamplePosition::Ratio(freq, m_MixerSettings.gdwMixingFreq << FREQ_FRACBITS);
 }
 
 
@@ -2301,16 +2408,6 @@ bool CSoundFile::ReadNote()
 				}
 			}
 
-			auto [ninc, freq] = GetChannelIncrement(chn, period, nPeriodFrac);
-#ifndef MODPLUG_TRACKER
-			ninc.MulDiv(m_nFreqFactor, 65536);
-#endif  // !MODPLUG_TRACKER
-			if(ninc.IsZero())
-			{
-				ninc.Set(0, 1);
-			}
-			chn.increment = ninc;
-
 			if((chn.dwFlags & (CHN_ADLIB | CHN_MUTE | CHN_SYNCMUTE)) == CHN_ADLIB && m_opl)
 			{
 				const bool doProcess = m_playBehaviour[kOPLFlexibleNoteOff] || !chn.dwFlags[CHN_NOTEFADE] || GetType() == MOD_TYPE_S3M;
@@ -2318,8 +2415,11 @@ bool CSoundFile::ReadNote()
 				{
 					// In ST3, a sample rate of 8363 Hz is mapped to middle-C, which is 261.625 Hz in a tempered scale at A4 = 440.
 					// Hence, we have to translate our "sample rate" into pitch.
+					const auto freq = hasTuning ? chn.nPeriod : GetFreqFromPeriod(period, chn.nC5Speed, nPeriodFrac);
 					auto milliHertz = Util::muldivr_unsigned(freq, 261625, 8363 << FREQ_FRACBITS);
-
+#ifndef MODPLUG_TRACKER
+					milliHertz = Util::muldivr_unsigned(milliHertz, m_nFreqFactor, 65536);
+#endif  // !MODPLUG_TRACKER
 					const bool keyOff = chn.dwFlags[CHN_KEYOFF] || (chn.dwFlags[CHN_NOTEFADE] && chn.nFadeOutVol == 0);
 					if(!m_playBehaviour[kOPLNoteStopWith0Hz] || !keyOff)
 						m_opl->Frequency(nChn, milliHertz, keyOff, m_playBehaviour[kOPLBeatingOscillators]);
@@ -2349,6 +2449,16 @@ bool CSoundFile::ReadNote()
 					chn.dwFlags.reset(CHN_ADLIB);
 				}
 			}
+
+			SamplePosition ninc = GetChannelIncrement(chn, period, nPeriodFrac);
+#ifndef MODPLUG_TRACKER
+			ninc.MulDiv(m_nFreqFactor, 65536);
+#endif // !MODPLUG_TRACKER
+			if(ninc.IsZero())
+			{
+				ninc.Set(0, 1);
+			}
+			chn.increment = ninc;
 		}
 
 		// Increment envelope positions
@@ -2493,12 +2603,15 @@ bool CSoundFile::ReadNote()
 			if(!chn.dwFlags[CHN_ADLIB])
 			{
 				m_PlayState.ChnMix[m_nMixChannels++] = nChn;
+				//MPT_LOG(LogDebug, "Sndmix", MPT_UFORMAT("chn.nMasterChn: {}, nChn: {}")(chn.nMasterChn, nChn));
 			}
 		} else
 		{
 			chn.rightVol = chn.leftVol = 0;
 			chn.nLength = 0;
+
 			// Put the channel back into the mixer for end-of-sample pop reduction
+			// @TODO: ReWire fix?!?!!? (OR VERIFY BUG GONE!)
 			if(chn.nLOfs || chn.nROfs)
 				m_PlayState.ChnMix[m_nMixChannels++] = nChn;
 		}

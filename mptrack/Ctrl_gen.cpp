@@ -21,6 +21,10 @@
 #include "../common/misc_util.h"
 #include "../common/mptTime.h"
 #include "../soundlib/mod_specifications.h"
+#ifdef MPT_WITH_REWIRE
+#include "../mptrack/Mainfrm.h"
+#include "../sounddev/SoundDeviceReWire.h"
+#endif
 
 
 OPENMPT_NAMESPACE_BEGIN
@@ -515,6 +519,15 @@ void CCtrlGeneral::OnTempoChanged()
 			m_modDoc.UpdateAllViews(nullptr, GeneralHint().General());
 			m_editsLocked = false;
 		}
+
+#ifdef MPT_WITH_REWIRE
+		SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(CMainFrame::GetMainFrame()->gpSoundDevice);
+		if(pDev)
+		{
+			pDev->m_Panel->signalBPMChange(m_sndFile.GetCurrentBPM());
+		}
+#endif
+
 	}
 }
 

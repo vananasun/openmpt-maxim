@@ -56,6 +56,10 @@
 
 #include "../common/FileReaderFwd.h"
 
+#ifdef MPT_WITH_APC
+#include "../mptrack/APC/APC40ControlMap.h"
+#endif
+
 
 OPENMPT_NAMESPACE_BEGIN
 
@@ -335,6 +339,10 @@ public:
 	void ChangeModTypeTo(const MODTYPE newType, bool adjust = true);
 #endif // MODPLUG_TRACKER
 
+#ifdef MPT_WITH_APC
+	APC40ControlMap *m_apc40ControlMap;
+#endif
+
 	// Returns value in seconds. If given position won't be played at all, returns -1.
 	// If updateVars is true, the state of various playback variables will be updated according to the playback position.
 	// If updateSamplePos is also true, the sample positions of samples still playing from previous patterns will be kept in sync.
@@ -470,6 +478,7 @@ public:
 	ModChannelSettings ChnSettings[MAX_BASECHANNELS];	// Initial channels settings
 	CPatternContainer Patterns;
 	ModSequenceSet Order;								// Pattern sequences (order lists)
+
 protected:
 	ModSample Samples[MAX_SAMPLES];						// Sample Headers
 public:
@@ -1007,7 +1016,7 @@ protected:
 
 	void ProcessRamping(ModChannel &chn) const;
 
-	std::pair<SamplePosition, uint32> GetChannelIncrement(const ModChannel &chn, uint32 period, int periodFrac) const;
+	SamplePosition GetChannelIncrement(const ModChannel &chn, uint32 period, int periodFrac) const;
 
 protected:
 	// Type of panning command

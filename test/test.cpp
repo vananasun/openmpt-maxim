@@ -11,7 +11,7 @@
 #include "stdafx.h"
 #include "test.h"
 
-
+#undef ENABLE_TESTS
 #ifdef ENABLE_TESTS
 
 

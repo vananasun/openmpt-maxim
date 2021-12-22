@@ -346,6 +346,7 @@ protected:
 	void InitializeMod();
 	void SetDefaultChannelColors();
 
+public:
 	CChildFrame *GetChildFrame(); //rewbs.customKeys
 
 // Overrides

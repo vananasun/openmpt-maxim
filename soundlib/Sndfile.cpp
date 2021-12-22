@@ -107,6 +107,10 @@ CSoundFile::CSoundFile() :
 	MemsetZero(Instruments);
 	Clear(m_szNames);
 
+#ifdef MPT_WITH_APC
+	m_apc40ControlMap = new APC40ControlMap();
+#endif
+
 	m_pTuningsTuneSpecific = new CTuningCollection();
 }
 
@@ -116,6 +120,9 @@ CSoundFile::~CSoundFile()
 	Destroy();
 	delete m_pTuningsTuneSpecific;
 	m_pTuningsTuneSpecific = nullptr;
+#ifdef MPT_WITH_APC
+	delete m_apc40ControlMap;
+#endif
 }
 
 
@@ -979,6 +986,7 @@ void CSoundFile::LoopPattern(PATTERNINDEX nPat, ROWINDEX nRow)
 }
 
 
+
 void CSoundFile::DontLoopPattern(PATTERNINDEX nPat, ROWINDEX nRow)
 {
 	if(!Patterns.IsValidPat(nPat)) nPat = 0;
@@ -1062,7 +1070,6 @@ PlayBehaviourSet CSoundFile::GetSupportedPlaybackBehaviour(MODTYPE type)
 			playBehaviour.set(kOPLFlexibleNoteOff);
 			playBehaviour.set(kOPLwithNNA);
 			playBehaviour.set(kOPLRealRetrig);
-			playBehaviour.set(kOPLNoteOffOnNoteChange);
 		}
 		break;
 
@@ -1123,7 +1130,6 @@ PlayBehaviourSet CSoundFile::GetSupportedPlaybackBehaviour(MODTYPE type)
 		playBehaviour.set(kST3OffsetWithoutInstrument);
 		playBehaviour.set(kST3RetrigAfterNoteCut);
 		playBehaviour.set(kST3SampleSwap);
-		playBehaviour.set(kOPLNoteOffOnNoteChange);
 		break;
 
 	case MOD_TYPE_MOD:

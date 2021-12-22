@@ -1,3 +1,10 @@
+Run the pre-built bin\release\vs2019-win10-static\amd64\OpenMPT.exe
+
+Use preprocessor flag MPT_WITH_APC for APC40 MkII support
+
+
+
+
 
 README
 ======

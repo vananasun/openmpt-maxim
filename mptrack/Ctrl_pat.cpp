@@ -23,7 +23,9 @@
 #include "PatternEditorDialogs.h"
 #include "ChannelManagerDlg.h"
 #include "../common/mptStringBuffer.h"
-
+#ifdef MPT_WITH_REWIRE
+#include "../sounddev/SoundDeviceReWire.h"
+#endif
 
 OPENMPT_NAMESPACE_BEGIN
 
@@ -174,6 +176,9 @@ BOOL CCtrlPatterns::OnInitDialog()
 
 	SetDlgItemInt(IDC_EDIT_SPACING, TrackerSettings::Instance().gnPatternSpacing);
 	CheckDlgButton(IDC_PATTERN_FOLLOWSONG, !(TrackerSettings::Instance().m_dwPatternSetup & PATTERN_FOLLOWSONGOFF));
+#ifdef MPT_WITH_APC
+	if(APC40::Enabled) theApp.m_apc40->m_api->setSends((bool)IsDlgButtonChecked(IDC_PATTERN_FOLLOWSONG));
+#endif // MPT_WITH_APC
 
 	m_SpinSequence.SetRange32(1, m_sndFile.Order.GetNumSequences());
 	m_SpinSequence.SetPos(m_sndFile.Order.GetCurrentSequenceIndex() + 1);
@@ -494,6 +499,9 @@ LRESULT CCtrlPatterns::OnModCtrlMsg(WPARAM wParam, LPARAM lParam)
 			}
 
 			m_sndFile.m_SongFlags.set(SONG_PATTERNLOOP, setLoop);
+#ifdef MPT_WITH_APC
+			if (APC40::Enabled) theApp.m_apc40->m_api->setPan(setLoop);
+#endif // MPT_WITH_APC
 			CheckDlgButton(IDC_PATTERN_LOOP, setLoop ? BST_CHECKED : BST_UNCHECKED);
 			break;
 		}
@@ -939,10 +947,26 @@ void CCtrlPatterns::OnPatternMerge()
 void CCtrlPatterns::OnPatternStop()
 {
 	CMainFrame *pMainFrm = CMainFrame::GetMainFrame();
+
+#ifdef MPT_WITH_REWIRE
+	SoundDevice::CReWireDevice *pDev = dynamic_cast<SoundDevice::CReWireDevice *>(pMainFrm->gpSoundDevice);
+	if(pDev)
+	{
+		pDev->m_Panel->signalStop();
+	}
+#endif
+
 	if(pMainFrm)
 		pMainFrm->PauseMod(&m_modDoc);
 	m_sndFile.ResetChannels();
 	SwitchToView();
+
+#ifdef MPT_WITH_APC
+	if (APC40::Enabled)
+	{
+		theApp.m_apc40->onStop();
+	}
+#endif
 }
 
 
@@ -1056,6 +1080,9 @@ void CCtrlPatterns::OnUpdateRecord(CCmdUI *pCmdUI)
 void CCtrlPatterns::OnFollowSong()
 {
 	SendViewMessage(VIEWMSG_FOLLOWSONG, IsDlgButtonChecked(IDC_PATTERN_FOLLOWSONG));
+#ifdef MPT_WITH_APC
+	if (APC40::Enabled) theApp.m_apc40->m_api->setSends((bool)IsDlgButtonChecked(IDC_PATTERN_FOLLOWSONG));
+#endif // MPT_WITH_APC
 	SwitchToView();
 }
 
