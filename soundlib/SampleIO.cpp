@@ -13,13 +13,17 @@
 #include "stdafx.h"
 #include "Loaders.h"
 #include "SampleIO.h"
-#include "../soundbase/SampleFormatConverters.h"
-#include "../soundbase/SampleFormatCopy.h"
+#include "openmpt/soundbase/SampleDecode.hpp"
+#include "SampleCopy.h"
+#include "SampleNormalize.h"
 #include "ModSampleCopy.h"
 #include "ITCompression.h"
-#include "../common/mptIO.h"
 #ifndef MODPLUG_NO_FILESAVE
 #include "../common/mptFileIO.h"
+#include "mpt/io/base.hpp"
+#include "mpt/io/io.hpp"
+#include "mpt/io/io_stdstream.hpp"
+#include "mpt/io_write/buffer.hpp"
 #endif
 #include "BitReader.h"
 
@@ -41,7 +45,7 @@ size_t SampleIO::ReadSample(ModSample &sample, FileReader &file) const
 
 	FileReader::off_t filePosition = file.GetPosition();
 	const std::byte * sourceBuf = nullptr;
-	FileReader::PinnedRawDataView restrictedSampleDataView;
+	FileReader::PinnedView restrictedSampleDataView;
 	FileReader::off_t fileSize = 0;
 	if(UsesFileReaderForDecoding())
 	{
@@ -49,9 +53,11 @@ size_t SampleIO::ReadSample(ModSample &sample, FileReader &file) const
 		fileSize = file.BytesLeft();
 	} else if(!IsVariableLengthEncoded())
 	{
-		restrictedSampleDataView = file.GetPinnedRawDataView(CalculateEncodedSize(sample.nLength));
+		restrictedSampleDataView = file.GetPinnedView(CalculateEncodedSize(sample.nLength));
 		sourceBuf = restrictedSampleDataView.data();
 		fileSize = restrictedSampleDataView.size();
+		if(sourceBuf == nullptr)
+			return 0;
 	} else
 	{
 		MPT_ASSERT_NOTREACHED();
@@ -169,7 +175,7 @@ size_t SampleIO::ReadSample(ModSample &sample, FileReader &file) const
 		int8 packCharacter = file.ReadUint8();
 		bytesRead += 9;
 
-		FileReader::PinnedRawDataView packedDataView = file.ReadPinnedRawDataView(sourceSize);
+		FileReader::PinnedView packedDataView = file.ReadPinnedView(sourceSize);
 		LimitMax(sourceSize, mpt::saturate_cast<uint32>(packedDataView.size()));
 		bytesRead += sourceSize;
 
@@ -290,9 +296,6 @@ size_t SampleIO::ReadSample(ModSample &sample, FileReader &file) const
 		case deltaPCM:		// 8-Bit / Mono / Delta / PCM
 		case MT2:
 			bytesRead = CopyMonoSample<SC::DecodeInt8Delta>(sample, sourceBuf, fileSize);
-			break;
-		case PCM7to8:		// 7 Bit stored as 8-Bit with highest bit unused / Mono / Signed / PCM
-			bytesRead = CopyMonoSample<SC::DecodeInt7>(sample, sourceBuf, fileSize);
 			break;
 		default:
 			MPT_ASSERT_NOTREACHED();

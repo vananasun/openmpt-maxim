@@ -45,7 +45,7 @@ constexpr std::tuple<InputTargetContext, CommandID, CommandID> NoteContexts[] =
 #endif
 
 #ifdef MPT_COMMANDSET_LOGGING
-#define LOG_COMMANDSET(x) MPT_LOG(LogDebug, "CommandSet", x)
+#define LOG_COMMANDSET(x) MPT_LOG_GLOBAL(LogDebug, "CommandSet", x)
 #else
 #define LOG_COMMANDSET(x) do { } while(0)
 #endif
@@ -744,6 +744,18 @@ static constexpr struct
 	{2017, kcSetFXFinetune, _T("Finetune") },
 	{2018, kcSetFXFinetuneSmooth, _T("Finetune (Smooth)")},
 	{2019, kcOrderlistEditInsertSeparator, _T("Insert Separator") },
+	{2020, kcTempoIncrease, _T("Increase Tempo")},
+	{2021, kcTempoDecrease, _T("Decrease Tempo")},
+	{2022, kcTempoIncreaseFine, _T("Increase Tempo (Fine)")},
+	{2023, kcTempoDecreaseFine, _T("Decrease Tempo (Fine)")},
+	{2024, kcSpeedIncrease, _T("Increase Ticks per Row")},
+	{2025, kcSpeedDecrease, _T("Decrease Ticks per Row")},
+	{2026, kcRenameSmpInsListItem, _T("Rename Item")},
+	{2027, kcShowChannelCtxMenu, _T("Show Channel Context (Right-Click) Menu")},
+	{2028, kcShowChannelPluginCtxMenu, _T("Show Channel Plugin Context (Right-Click) Menu")},
+	{2029, kcViewToggle, _T("Toggle Between Upper / Lower View") },
+	{2030, kcFileSaveOPL, _T("File/Export OPL Register Dump") },
+	{2031, kcSampleLoadRaw, _T("Load Raw Sample")},
 };
 
 // Get command descriptions etc.. loaded up.
@@ -1382,13 +1394,12 @@ CString CCommandSet::EnforceAll(KeyCombination inKc, CommandID inCmd, bool addin
 	}
 	if (m_enforceRule[krPropagateSampleManipulation])
 	{
-		if (inCmd>=kcSampleLoad && inCmd<=kcSampleNew)
+		static constexpr CommandID propagateCmds[] = {kcSampleLoad, kcSampleSave, kcSampleNew};
+		static constexpr CommandID translatedCmds[] = {kcInstrumentLoad, kcInstrumentSave, kcInstrumentNew};
+		if(const auto propCmd = std::find(std::begin(propagateCmds), std::end(propagateCmds), inCmd); propCmd != std::end(propagateCmds))
 		{
-			int newCmd;
-			int offset = inCmd-kcStartSampleMisc;
-
 			//propagate to InstrumentView
-			newCmd = kcStartInstrumentMisc+offset;
+			const auto newCmd = translatedCmds[std::distance(std::begin(propagateCmds), propCmd)];
 			m_commands[newCmd].kcList.reserve(m_commands[inCmd].kcList.size());
 			for(auto kc : m_commands[inCmd].kcList)
 			{

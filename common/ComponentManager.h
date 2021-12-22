@@ -10,28 +10,19 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
+
+#include "mpt/mutex/mutex.hpp"
 
 #include <map>
 #include <vector>
 #include "../common/misc_util.h"
-#include "../common/mptMutex.h"
+#if defined(MODPLUG_TRACKER)
+#include "../misc/mptLibrary.h"
+#endif
 
 
 OPENMPT_NAMESPACE_BEGIN
-
-
-#define MPT_ENABLE_COMPONENTS
-
-
-#if defined(MPT_ENABLE_COMPONENTS)
-
-
-#if defined(MODPLUG_TRACKER)
-#define MPT_COMPONENT_MANAGER 1
-#else
-#define MPT_COMPONENT_MANAGER 0
-#endif
 
 
 enum ComponentType
@@ -135,7 +126,7 @@ public:
 #define MPT_GLOBAL_BIND(lib, name) name = &::name;
 
 
-#if defined(MPT_ENABLE_DYNBIND)
+#if defined(MODPLUG_TRACKER)
 
 
 class ComponentLibrary
@@ -238,7 +229,7 @@ public:
 };
 
 
-#endif // MPT_ENABLE_DYNBIND
+#endif // MODPLUG_TRACKER
 
 
 #if MPT_COMPONENT_MANAGER
@@ -461,12 +452,6 @@ std::shared_ptr<const type> GetComponent()
 }
 
 
-inline mpt::PathString GetComponentPath()
-{
-	return mpt::PathString();
-}
-
-
 #endif // MPT_COMPONENT_MANAGER
 
 
@@ -518,9 +503,6 @@ bool IsComponentAvailable(const ComponentHandle<T> &handle)
 {
 	return handle.IsAvailable();
 }
-
-
-#endif // MPT_ENABLE_COMPONENTS
 
 
 OPENMPT_NAMESPACE_END

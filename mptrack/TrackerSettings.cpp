@@ -13,8 +13,10 @@
 #include "Mptrack.h"
 #include "Moddoc.h"
 #include "Mainfrm.h"
-#include "../sounddev/SoundDevice.h"
-#include "../sounddev/SoundDeviceManager.h"
+#include "mpt/environment/environment.hpp"
+#include "mpt/uuid/uuid.hpp"
+#include "openmpt/sounddevice/SoundDevice.hpp"
+#include "openmpt/sounddevice/SoundDeviceManager.hpp"
 #include "../common/version.h"
 #include "UpdateCheck.h"
 #include "Mpdlgs.h"
@@ -26,7 +28,6 @@
 #include "ExceptionHandler.h"
 #include "../soundlib/mod_specifications.h"
 #include "../soundlib/Tables.h"
-#include "../common/mptUUID.h"
 #include "../common/mptFileIO.h"
 #include "../soundlib/tuningcollection.h"
 #include "TuningDialog.h"
@@ -42,7 +43,11 @@ OPENMPT_NAMESPACE_BEGIN
 #define OLD_SOUNDSETUP_SECONDARY             0x40
 #define OLD_SOUNDSETUP_NOBOOSTTHREADPRIORITY 0x80
 
+#ifndef NO_EQ
+
 constexpr EQPreset FlatEQPreset = {"Flat", {16, 16, 16, 16, 16, 16}, {125, 300, 600, 1250, 4000, 8000}};
+
+#endif // !NO_EQ
 
 
 TrackerSettings &TrackerSettings::Instance()
@@ -109,7 +114,7 @@ void SampleUndoBufferSize::CalculateSize()
 DebugSettings::DebugSettings(SettingsContainer &conf)
 	: conf(conf)
 	// Debug
-#if !defined(NO_LOGGING) && !defined(MPT_LOG_IS_DISABLED)
+#if !defined(MPT_LOG_IS_DISABLED)
 	, DebugLogLevel(conf, U_("Debug"), U_("LogLevel"), static_cast<int>(mpt::log::GlobalLogLevel))
 	, DebugLogFacilitySolo(conf, U_("Debug"), U_("LogFacilitySolo"), std::string())
 	, DebugLogFacilityBlocked(conf, U_("Debug"), U_("LogFacilityBlocked"), std::string())
@@ -131,7 +136,7 @@ DebugSettings::DebugSettings(SettingsContainer &conf)
 	ExceptionHandler::delegateToWindowsHandler = DebugDelegateToWindowsHandler;
 
 		// enable debug features (as early as possible after reading the settings)
-	#if !defined(NO_LOGGING) && !defined(MPT_LOG_IS_DISABLED)
+	#if !defined(MPT_LOG_IS_DISABLED)
 		#if !defined(MPT_LOG_GLOBAL_LEVEL_STATIC)
 			mpt::log::GlobalLogLevel = DebugLogLevel;
 		#endif
@@ -189,7 +194,7 @@ TrackerSettings::TrackerSettings(SettingsContainer &conf)
 	, rememberSongWindows(conf, U_("Display"), U_("RememberSongWindows"), true)
 	, showDirsInSampleBrowser(conf, U_("Display"), U_("ShowDirsInSampleBrowser"), false)
 	, commentsFont(conf, U_("Display"), U_("Comments Font"), FontSetting(U_("Courier New"), 120))
-	, defaultRainbowChannelColors(conf, U_("Display"), U_("DefaultChannelColors"), DefaultChannelColors::Rainbow)
+	, defaultRainbowChannelColors(conf, U_("Display"), U_("DefaultChannelColors"), DefaultChannelColors::Random)
 	// Misc
 	, defaultModType(conf, U_("Misc"), U_("DefaultModType"), MOD_TYPE_IT)
 	, defaultNewFileAction(conf, U_("Misc"), U_("DefaultNewFileAction"), nfDefaultFormat)
@@ -203,6 +208,7 @@ TrackerSettings::TrackerSettings(SettingsContainer &conf)
 	, MiscProcessPriorityClass(conf, U_("Misc"), U_("ProcessPriorityClass"), ProcessPriorityClassNORMAL)
 	, MiscFlushFileBuffersOnSave(conf, U_("Misc"), U_("FlushFileBuffersOnSave"), true)
 	, MiscCacheCompleteFileBeforeLoading(conf, U_("Misc"), U_("CacheCompleteFileBeforeLoading"), false)
+	, MiscUseSingleInstance(conf, U_("Misc"), U_("UseSingleInstance"), false)
 	// Sound Settings
 	, m_SoundShowRecordingSettings(false)
 	, m_SoundShowDeprecatedDevices(conf, U_("Sound Settings"), U_("ShowDeprecatedDevices"), false)
@@ -212,9 +218,6 @@ TrackerSettings::TrackerSettings(SettingsContainer &conf)
 	, m_SoundSettingsStopMode(conf, U_("Sound Settings"), U_("StopMode"), SoundDeviceStopModeClosed)
 	, m_SoundDeviceSettingsUseOldDefaults(false)
 	, m_SoundDeviceID_DEPRECATED(SoundDevice::Legacy::ID())
-#if defined(MPT_WITH_DIRECTSOUND)
-	, m_SoundDeviceDirectSoundOldDefaultIdentifier(false)
-#endif // MPT_WITH_DIRECTSOUND
 	, m_SoundDeviceIdentifier(conf, U_("Sound Settings"), U_("Device"), SoundDevice::Identifier())
 	, MixerMaxChannels(conf, U_("Sound Settings"), U_("MixChannels"), MixerSettings().m_nMaxMixChannels)
 	, MixerDSPMask(conf, U_("Sound Settings"), U_("Quality"), MixerSettings().DSPMask)
@@ -471,7 +474,7 @@ TrackerSettings::TrackerSettings(SettingsContainer &conf)
 	if(!VersionInstallGUID.Get().IsValid())
 	{
 		// No UUID found - generate one.
-		VersionInstallGUID = mpt::UUID::Generate();
+		VersionInstallGUID = mpt::UUID::Generate(mpt::global_prng());
 	}
 
 	// Plugins
@@ -572,12 +575,6 @@ TrackerSettings::TrackerSettings(SettingsContainer &conf)
 		// and in general, it should not get changed anyway
 		ResamplerCutoffPercent = mpt::saturate_round<int32>(CResamplerSettings().gdWFIRCutoff * 100.0);
 	}
-#if defined(MPT_WITH_DIRECTSOUND)
-	if(storedVersion < MPT_V("1.25.00.04"))
-	{
-		m_SoundDeviceDirectSoundOldDefaultIdentifier = true;
-	}
-#endif // MPT_WITH_DIRECTSOUND
 	if(MixerSamplerate == 0)
 	{
 		MixerSamplerate = MixerSettings().gdwMixingFreq;
@@ -680,6 +677,129 @@ TrackerSettings::TrackerSettings(SettingsContainer &conf)
 		// Moving option out of pattern config
 		CreateBackupFiles = (m_dwPatternSetup & 0x200) != 0;
 		m_dwPatternSetup &= ~0x200;
+	}
+
+	// Export
+	if(storedVersion < MPT_V("1.30.00.38"))
+	{
+		{
+			conf.Write<Encoder::Mode>(U_("Export"), U_("FLAC_Mode"), Encoder::ModeLossless);
+			const int oldformat = conf.Read<int>(U_("Export"), U_("FLAC_Format"), 1);
+			Encoder::Format newformat = { Encoder::Format::Encoding::Integer, 24, mpt::get_endian() };
+			if (oldformat >= 0)
+			{
+				switch (oldformat % 3)
+				{
+				case 0:
+					newformat = { Encoder::Format::Encoding::Integer, 24, mpt::get_endian() };
+					break;
+				case 1:
+					newformat = { Encoder::Format::Encoding::Integer, 16, mpt::get_endian() };
+					break;
+				case 2:
+					newformat = { Encoder::Format::Encoding::Integer, 8, mpt::get_endian() };
+					break;
+				}
+			}
+			conf.Write<Encoder::Format>(U_("Export"), U_("FLAC_Format2"), newformat);
+			conf.Forget(U_("Export"), U_("FLAC_Format"));
+		}
+		{
+			conf.Write<Encoder::Mode>(U_("Export"), U_("Wave_Mode"), Encoder::ModeLossless);
+			const int oldformat = conf.Read<int>(U_("Export"), U_("Wave_Format"), 1);
+			Encoder::Format newformat = { Encoder::Format::Encoding::Float, 32, mpt::endian::little };
+			if (oldformat >= 0)
+			{
+				switch (oldformat % 6)
+				{
+				case 0:
+					newformat = { Encoder::Format::Encoding::Float, 64, mpt::endian::little };
+					break;
+				case 1:
+					newformat = { Encoder::Format::Encoding::Float, 32, mpt::endian::little };
+					break;
+				case 2:
+					newformat = { Encoder::Format::Encoding::Integer, 32, mpt::endian::little };
+					break;
+				case 3:
+					newformat = { Encoder::Format::Encoding::Integer, 24, mpt::endian::little };
+					break;
+				case 4:
+					newformat = { Encoder::Format::Encoding::Integer, 16, mpt::endian::little };
+					break;
+				case 5:
+					newformat = { Encoder::Format::Encoding::Unsigned, 8, mpt::endian::little };
+					break;
+				}
+			}
+			conf.Write<Encoder::Format>(U_("Export"), U_("Wave_Format2"), newformat);
+			conf.Forget(U_("Export"), U_("Wave_Format"));
+		}
+		{
+			conf.Write<Encoder::Mode>(U_("Export"), U_("AU_Mode"), Encoder::ModeLossless);
+			const int oldformat = conf.Read<int>(U_("Export"), U_("AU_Format"), 1);
+			Encoder::Format newformat = { Encoder::Format::Encoding::Float, 32, mpt::endian::big };
+			if(oldformat >= 0)
+			{
+				switch(oldformat % 6)
+				{
+				case 0:
+					newformat = { Encoder::Format::Encoding::Float, 64, mpt::endian::big };
+					break;
+				case 1:
+					newformat = { Encoder::Format::Encoding::Float, 32, mpt::endian::big };
+					break;
+				case 2:
+					newformat = { Encoder::Format::Encoding::Integer, 32, mpt::endian::big };
+					break;
+				case 3:
+					newformat = { Encoder::Format::Encoding::Integer, 24, mpt::endian::big };
+					break;
+				case 4:
+					newformat = { Encoder::Format::Encoding::Integer, 16, mpt::endian::big };
+					break;
+				case 5:
+					newformat = { Encoder::Format::Encoding::Integer, 8, mpt::endian::big };
+					break;
+				}
+			}
+			conf.Write<Encoder::Format>(U_("Export"), U_("AU_Format2"), newformat);
+			conf.Forget(U_("Export"), U_("AU_Format"));
+		}
+		{
+			conf.Write<Encoder::Mode>(U_("Export"), U_("RAW_Mode"), Encoder::ModeLossless);
+			const int oldformat = conf.Read<int>(U_("Export"), U_("RAW_Format"), 1);
+			Encoder::Format newformat = { Encoder::Format::Encoding::Float, 32, mpt::get_endian() };
+			if(oldformat >= 0)
+			{
+				switch(oldformat % 7)
+				{
+				case 0:
+					newformat = { Encoder::Format::Encoding::Float, 64, mpt::get_endian() };
+					break;
+				case 1:
+					newformat = { Encoder::Format::Encoding::Float, 32, mpt::get_endian() };
+					break;
+				case 2:
+					newformat = { Encoder::Format::Encoding::Integer, 32, mpt::get_endian() };
+					break;
+				case 3:
+					newformat = { Encoder::Format::Encoding::Integer, 24, mpt::get_endian() };
+					break;
+				case 4:
+					newformat = { Encoder::Format::Encoding::Integer, 16, mpt::get_endian() };
+					break;
+				case 5:
+					newformat = { Encoder::Format::Encoding::Integer, 8, mpt::get_endian() };
+					break;
+				case 6:
+					newformat = { Encoder::Format::Encoding::Unsigned, 8, mpt::get_endian() };
+					break;
+				}
+			}
+			conf.Write<Encoder::Format>(U_("Export"), U_("RAW_Format2"), newformat);
+			conf.Forget(U_("Export"), U_("RAW_Format"));
+		}
 	}
 
 #if defined(MPT_ENABLE_UPDATE)
@@ -795,6 +915,69 @@ TrackerSettings::~TrackerSettings()
 }
 
 
+namespace SoundDevice
+{
+namespace Legacy
+{
+SoundDevice::Info FindDeviceInfo(SoundDevice::Manager &manager, SoundDevice::Legacy::ID id)
+{
+	if(manager.GetDeviceInfos().empty())
+	{
+		return SoundDevice::Info();
+	}
+	SoundDevice::Type type = SoundDevice::Type();
+	switch((id & SoundDevice::Legacy::MaskType) >> SoundDevice::Legacy::ShiftType)
+	{
+		case SoundDevice::Legacy::TypeWAVEOUT:
+			type = SoundDevice::TypeWAVEOUT;
+			break;
+		case SoundDevice::Legacy::TypeDSOUND:
+			type = SoundDevice::TypeDSOUND;
+			break;
+		case SoundDevice::Legacy::TypeASIO:
+			type = SoundDevice::TypeASIO;
+			break;
+		case SoundDevice::Legacy::TypePORTAUDIO_WASAPI:
+			type = SoundDevice::TypePORTAUDIO_WASAPI;
+			break;
+		case SoundDevice::Legacy::TypePORTAUDIO_WDMKS:
+			type = SoundDevice::TypePORTAUDIO_WDMKS;
+			break;
+		case SoundDevice::Legacy::TypePORTAUDIO_WMME:
+			type = SoundDevice::TypePORTAUDIO_WMME;
+			break;
+		case SoundDevice::Legacy::TypePORTAUDIO_DS:
+			type = SoundDevice::TypePORTAUDIO_DS;
+			break;
+	}
+	if(type.empty())
+	{	// fallback to first device
+		return *manager.begin();
+	}
+	std::size_t index = static_cast<uint8>((id & SoundDevice::Legacy::MaskIndex) >> SoundDevice::Legacy::ShiftIndex);
+	std::size_t seenDevicesOfDesiredType = 0;
+	for(const auto &info : manager)
+	{
+		if(info.type == type)
+		{
+			if(seenDevicesOfDesiredType == index)
+			{
+				if(!info.IsValid())
+				{	// fallback to first device
+					return *manager.begin();
+				}
+				return info;
+			}
+			seenDevicesOfDesiredType++;
+		}
+	}
+	// default to first device
+	return *manager.begin();
+}
+} // namespace Legacy
+} // namespace SoundDevice
+
+
 void TrackerSettings::MigrateOldSoundDeviceSettings(SoundDevice::Manager &manager)
 {
 	if(m_SoundDeviceSettingsUseOldDefaults)
@@ -807,50 +990,6 @@ void TrackerSettings::MigrateOldSoundDeviceSettings(SoundDevice::Manager &manage
 			SetSoundDeviceSettings(it.GetIdentifier(), GetSoundDeviceSettingsDefaults());
 		}
 	}
-#if defined(MPT_WITH_DIRECTSOUND)
-	if(m_SoundDeviceDirectSoundOldDefaultIdentifier)
-	{
-		mpt::ustring oldIdentifier = SoundDevice::Legacy::GetDirectSoundDefaultDeviceIdentifierPre_1_25_00_04();
-		mpt::ustring newIdentifier = SoundDevice::Legacy::GetDirectSoundDefaultDeviceIdentifier_1_25_00_04();
-		if(!oldIdentifier.empty())
-		{
-			SoundDevice::Info info = manager.FindDeviceInfo(newIdentifier);
-			if(info.IsValid())
-			{
-				SoundDevice::Settings defaults =
-					m_SoundDeviceSettingsUseOldDefaults ?
-						GetSoundDeviceSettingsDefaults()
-					:
-						manager.GetDeviceCaps(newIdentifier).DefaultSettings
-					;
-				const mpt::ustring newIdentifierW = newIdentifier + U_("_");
-				const mpt::ustring oldIdentifierW = oldIdentifier + U_("_");
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("Latency"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("Latency"), mpt::saturate_round<int32>(defaults.Latency * 1000000.0)));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("UpdateInterval"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("UpdateInterval"), mpt::saturate_round<int32>(defaults.UpdateInterval * 1000000.0)));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("SampleRate"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("SampleRate"), defaults.Samplerate));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("Channels"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("Channels"), defaults.Channels.GetNumHostChannels()));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("SampleFormat"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("SampleFormat"), defaults.sampleFormat));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("ExclusiveMode"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("ExclusiveMode"), defaults.ExclusiveMode));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("BoostThreadPriority"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("BoostThreadPriority"), defaults.BoostThreadPriority));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("KeepDeviceRunning"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("KeepDeviceRunning"), defaults.KeepDeviceRunning));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("UseHardwareTiming"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("UseHardwareTiming"), defaults.UseHardwareTiming));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("DitherType"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("DitherType"), defaults.DitherType));
-				conf.Write(U_("Sound Settings"), newIdentifierW + U_("ChannelMapping"),
-					conf.Read(U_("Sound Settings"), oldIdentifierW + U_("ChannelMapping"), defaults.Channels));
-			}
-		}
-	}
-#endif // MPT_WITH_DIRECTSOUND
 }
 
 
@@ -930,7 +1069,7 @@ private:
 	Setting<bool> BoostThreadPriority;
 	Setting<bool> KeepDeviceRunning;
 	Setting<bool> UseHardwareTiming;
-	Setting<int> DitherType;
+	Setting<int32> DitherType;
 	Setting<uint32> InputSourceID;
 
 public:
@@ -949,7 +1088,7 @@ public:
 		, BoostThreadPriority(conf, U_("Sound Settings"), deviceInfo.GetIdentifier() + U_("_") + U_("BoostThreadPriority"), defaults.BoostThreadPriority)
 		, KeepDeviceRunning(conf, U_("Sound Settings"), deviceInfo.GetIdentifier() + U_("_") + U_("KeepDeviceRunning"), defaults.KeepDeviceRunning)
 		, UseHardwareTiming(conf, U_("Sound Settings"), deviceInfo.GetIdentifier() + U_("_") + U_("UseHardwareTiming"), defaults.UseHardwareTiming)
-		, DitherType(conf, U_("Sound Settings"), deviceInfo.GetIdentifier() + U_("_") + U_("DitherType"), defaults.DitherType)
+		, DitherType(conf, U_("Sound Settings"), deviceInfo.GetIdentifier() + U_("_") + U_("DitherType"), static_cast<int32>(defaults.DitherType))
 		, InputSourceID(conf, U_("Sound Settings"), deviceInfo.GetIdentifier() + U_("_") + U_("InputSourceID"), defaults.InputSourceID)
 	{
 		if(ChannelMapping.Get().GetNumHostChannels() != ChannelsOld)
@@ -978,7 +1117,7 @@ public:
 		BoostThreadPriority = settings.BoostThreadPriority;
 		KeepDeviceRunning = settings.KeepDeviceRunning;
 		UseHardwareTiming = settings.UseHardwareTiming;
-		DitherType = settings.DitherType;
+		DitherType = static_cast<int32>(settings.DitherType);
 		InputSourceID = settings.InputSourceID;
 		return *this;
 	}
@@ -1137,6 +1276,8 @@ void TrackerSettings::GetDefaultColourScheme(std::array<COLORREF, MAX_MODCOLORS>
 }
 
 
+#ifndef NO_EQ
+
 void TrackerSettings::FixupEQ(EQPreset &eqSettings)
 {
 	for(UINT i = 0; i < MAX_EQ_BANDS; i++)
@@ -1148,6 +1289,8 @@ void TrackerSettings::FixupEQ(EQPreset &eqSettings)
 	}
 	mpt::String::SetNullTerminator(eqSettings.szName);
 }
+
+#endif // !NO_EQ
 
 
 void TrackerSettings::SaveSettings()

@@ -103,8 +103,17 @@ BOOL CNoteMapWnd::PreTranslateMessage(MSG* pMsg)
 	}
 	else if (pMsg->message == WM_KEYDOWN) //key is not a character
 	{
-		if (HandleNav(wParam))
+		if(HandleNav(wParam))
 			return true;
+
+		// Handle Application (menu) key
+		if(wParam == VK_APPS)
+		{
+			CRect clientRect;
+			GetClientRect(clientRect);
+			clientRect.bottom = clientRect.top + mpt::align_up(clientRect.Height(), m_cyFont);
+			OnRButtonDown(0, clientRect.CenterPoint());
+		}
 	}
 	else if (pMsg->message == WM_KEYUP) //stop notes on key release
 	{
@@ -366,7 +375,7 @@ void CNoteMapWnd::OnRButtonDown(UINT, CPoint pt)
 
 BOOL CNoteMapWnd::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
-	SetCurrentNote(m_nNote - sgn(zDelta));
+	SetCurrentNote(m_nNote - mpt::signum(zDelta));
 	return CStatic::OnMouseWheel(nFlags, zDelta, pt);
 }
 
@@ -495,7 +504,7 @@ void CNoteMapWnd::MapTranspose(int nAmount)
 	if((nAmount == 12 || nAmount == -12))
 	{
 		// Special case for instrument-specific tunings
-		nAmount = m_modDoc.GetInstrumentGroupSize(m_nInstrument) * sgn(nAmount);
+		nAmount = m_modDoc.GetInstrumentGroupSize(m_nInstrument) * mpt::signum(nAmount);
 	}
 
 	m_undo = true;
@@ -1140,7 +1149,7 @@ BOOL CCtrlInstruments::SetCurrentInstrument(UINT nIns, BOOL bUpdNum)
 		// Volume ramping (attack)
 		m_SliderAttack.Invalidate(FALSE);
 	}
-	PostViewMessage(VIEWMSG_SETCURRENTINSTRUMENT, m_nInstrument);
+	SendViewMessage(VIEWMSG_SETCURRENTINSTRUMENT, m_nInstrument);
 	UnlockControls();
 
 	return TRUE;
@@ -1208,19 +1217,11 @@ LRESULT CCtrlInstruments::OnModCtrlMsg(WPARAM wParam, LPARAM lParam)
 		OnNextInstrument();
 		break;
 
-	case CTRLMSG_INS_OPENFILE_NEW:
-		if(!InsertInstrument(false))
-			break;
-		[[fallthrough]];
 	case CTRLMSG_INS_OPENFILE:
 		if(lParam)
 			return OpenInstrument(*reinterpret_cast<const mpt::PathString *>(lParam));
 		break;
 
-	case CTRLMSG_INS_SONGDROP_NEW:
-		if(!InsertInstrument(false))
-			break;
-		[[fallthrough]];
 	case CTRLMSG_INS_SONGDROP:
 		if(lParam)
 		{
@@ -1231,8 +1232,7 @@ LRESULT CCtrlInstruments::OnModCtrlMsg(WPARAM wParam, LPARAM lParam)
 		break;
 
 	case CTRLMSG_INS_NEWINSTRUMENT:
-		OnInstrumentNew();
-		break;
+		return InsertInstrument(false) ? 1 : 0;
 
 	case CTRLMSG_SETCURRENTINSTRUMENT:
 		SetCurrentInstrument(static_cast<INSTRUMENTINDEX>(lParam));
@@ -1949,12 +1949,12 @@ void CCtrlInstruments::OnInstrumentOpen()
 		.AllowMultiSelect()
 		.EnableAudioPreview()
 		.ExtensionFilter(
-			"All Instruments|*.xi;*.pat;*.iti;*.sfz;*.flac;*.wav;*.w64;*.caf;*.aif;*.aiff;*.au;*.snd;*.sf2;*.sbk;*.dls;*.oga;*.ogg;*.opus;*.s3i;*.sb0;*.sb2;*.sbi;*.brr" + ToFilterOnlyString(mediaFoundationTypes, true).ToLocale() + "|"
+			"All Instruments (*.xi,*.pat,*.iti,*.sfz,...)|*.xi;*.pat;*.iti;*.sfz;*.flac;*.wav;*.w64;*.caf;*.aif;*.aiff;*.au;*.snd;*.sbk;*.sf2;*.sf3;*.sf4;*.dls;*.oga;*.ogg;*.opus;*.s3i;*.sb0;*.sb2;*.sbi;*.brr" + ToFilterOnlyString(mediaFoundationTypes, true).ToLocale() + "|"
 			"FastTracker II Instruments (*.xi)|*.xi|"
 			"GF1 Patches (*.pat)|*.pat|"
 			"Impulse Tracker Instruments (*.iti)|*.iti|"
 			"SFZ Instruments (*.sfz)|*.sfz|"
-			"SoundFont 2.0 Banks (*.sf2)|*.sf2;*.sbk|"
+			"SoundFont 2.0 Banks (*.sf2)|*.sbk;*.sf2;*.sf3;*.sf4|"
 			"DLS Sound Banks (*.dls)|*.dls|"
 			"All Files (*.*)|*.*||")
 		.WorkingDirectory(TrackerSettings::Instance().PathInstruments.GetWorkingDir())
@@ -2908,7 +2908,7 @@ void CCtrlInstruments::OnCbnSelchangeCombotuning()
 	{
 		CriticalSection cs;
 		PrepareUndo("Set Tuning");
-		instr->SetTuning(&m_sndFile.GetTuneSpecificTunings().GetTuning(sel));
+		instr->SetTuning(m_sndFile.GetTuneSpecificTunings().GetTuning(sel));
 		cs.Leave();
 
 		SetModified(InstrumentHint().Info(), true);
@@ -2947,7 +2947,7 @@ void CCtrlInstruments::UpdateTuningComboBox()
 
 	for(size_t i = 0; i < m_sndFile.GetTuneSpecificTunings().GetNumTunings(); i++)
 	{
-		if(pIns->pTuning == &m_sndFile.GetTuneSpecificTunings().GetTuning(i))
+		if(pIns->pTuning == m_sndFile.GetTuneSpecificTunings().GetTuning(i))
 		{
 			m_ComboTuning.SetCurSel((int)(i + 1));
 			return;

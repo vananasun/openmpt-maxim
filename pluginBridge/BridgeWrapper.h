@@ -10,9 +10,9 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 
 #include "BridgeCommon.h"
 #include "../common/ComponentManager.h"
@@ -234,4 +234,4 @@ protected:
 
 OPENMPT_NAMESPACE_END
 
-#endif // NO_VST
+#endif // MPT_WITH_VST

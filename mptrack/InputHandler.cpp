@@ -28,6 +28,7 @@ CInputHandler::CInputHandler(CWnd *mainframe)
 
 	//Init CommandSet and Load defaults
 	m_activeCommandSet = std::make_unique<CCommandSet>();
+	m_lastCommands.fill(kcNull);
 
 	mpt::PathString sDefaultPath = theApp.GetConfigPath() + P_("Keybindings.mkb");
 
@@ -49,7 +50,7 @@ CInputHandler::CInputHandler(CWnd *mainframe)
 		if (!bSuccess)
 		{
 			// Load keybindings from resources.
-			MPT_LOG(LogDebug, "InputHandler", U_("Loading keybindings from resources\n"));
+			MPT_LOG_GLOBAL(LogDebug, "InputHandler", U_("Loading keybindings from resources\n"));
 			bSuccess = m_activeCommandSet->LoadDefaultKeymap();
 			if (bSuccess && bNoExistingKbdFileSetting)
 			{
@@ -68,7 +69,7 @@ CInputHandler::CInputHandler(CWnd *mainframe)
 }
 
 
-static CommandID SendCommands(CWnd *wnd, const KeyMapRange &cmd)
+CommandID CInputHandler::SendCommands(CWnd *wnd, const KeyMapRange &cmd)
 {
 	CommandID executeCommand = kcNull;
 	if(wnd != nullptr)
@@ -83,6 +84,8 @@ static CommandID SendCommands(CWnd *wnd, const KeyMapRange &cmd)
 		}
 		for(const auto &i : commands)
 		{
+			m_lastCommands[m_lastCommandPos] = i.second;
+			m_lastCommandPos = (m_lastCommandPos + 1) % m_lastCommands.size();
 			if(wnd->SendMessage(WM_MOD_KEYCOMMAND, i.second, i.first.AsLPARAM()) != kcNull)
 			{
 				// Command was handled, no need to let the OS handle the key
@@ -131,7 +134,7 @@ CommandID CInputHandler::GeneralKeyEvent(InputTargetContext context, int code, W
 	}
 	if(code == HC_MIDI)
 	{
-		cmd = m_keyMap.equal_range(KeyCombination(context, ModMidi, static_cast<UINT>(wParam), kKeyEventDown));
+		cmd = m_keyMap.equal_range(KeyCombination(context, ModMidi, static_cast<UINT>(wParam), static_cast<KeyEventType>(lParam)));
 	}
 
 	return SendCommands(m_pMainFrm, cmd);
@@ -141,7 +144,7 @@ CommandID CInputHandler::GeneralKeyEvent(InputTargetContext context, int code, W
 CommandID CInputHandler::KeyEvent(InputTargetContext context, UINT &nChar, UINT &/*nRepCnt*/, UINT &nFlags, KeyEventType keyEventType, CWnd *pSourceWnd)
 {
 	if(InterceptSpecialKeys(nChar, nFlags, false))
-		return kcNull;
+		return kcDummyShortcut;
 	KeyMapRange cmd = m_keyMap.equal_range(KeyCombination(context, m_modifierMask, nChar, keyEventType));
 
 	if(pSourceWnd == nullptr)
@@ -266,7 +269,7 @@ bool CInputHandler::CatchModifierChange(WPARAM wParam, KeyEventType keyEventType
 // Translate MIDI messages to shortcut commands
 CommandID CInputHandler::HandleMIDIMessage(InputTargetContext context, uint32 message)
 {
-	const auto byte1 = MIDIEvents::GetDataByte1FromEvent(message), byte2 = MIDIEvents::GetDataByte2FromEvent(message);
+	auto byte1 = MIDIEvents::GetDataByte1FromEvent(message), byte2 = MIDIEvents::GetDataByte2FromEvent(message);
 	switch(MIDIEvents::GetTypeFromEvent(message))
 	{
 	case MIDIEvents::evControllerChange:
@@ -274,13 +277,23 @@ CommandID CInputHandler::HandleMIDIMessage(InputTargetContext context, uint32 me
 		{
 			// Only capture MIDI CCs for now. Some controllers constantly send some MIDI CCs with value 0
 			// (e.g. the Roland D-50 sends CC123 whenenver all notes have been released), so we will ignore those.
-			return GeneralKeyEvent(context, HC_MIDI, byte1, 0);
+			return GeneralKeyEvent(context, HC_MIDI, byte1, kKeyEventDown);
 		}
 		break;
 
-	case MIDIEvents::evNoteOn:
 	case MIDIEvents::evNoteOff:
-		return GeneralKeyEvent(context, HC_MIDI, byte1 | 0x80, 0);
+		byte2 = 0;
+		[[fallthrough]];
+	case MIDIEvents::evNoteOn:
+		if(byte2 != 0)
+		{
+			return GeneralKeyEvent(context, HC_MIDI, byte1 | 0x80, kKeyEventDown);
+		} else
+		{
+			// If the key-down triggered a note, we still want that note to be stopped. So we always pretend that no key was assigned to this event
+			GeneralKeyEvent(context, HC_MIDI, byte1 | 0x80, kKeyEventUp);
+		}
+		break;
 	}
 
 	return kcNull;
@@ -298,11 +311,11 @@ int CInputHandler::GetKeyListSize(CommandID cmd) const
 
 void CInputHandler::LogModifiers()
 {
-	MPT_LOG(LogDebug, "InputHandler", U_("----------------------------------\n"));
-	if (m_modifierMask[ModCtrl])  MPT_LOG(LogDebug, "InputHandler", U_("Ctrl On")); else MPT_LOG(LogDebug, "InputHandler", U_("Ctrl --"));
-	if (m_modifierMask[ModShift]) MPT_LOG(LogDebug, "InputHandler", U_("\tShft On")); else MPT_LOG(LogDebug, "InputHandler", U_("\tShft --"));
-	if (m_modifierMask[ModAlt])   MPT_LOG(LogDebug, "InputHandler", U_("\tAlt  On")); else MPT_LOG(LogDebug, "InputHandler", U_("\tAlt  --"));
-	if (m_modifierMask[ModWin])   MPT_LOG(LogDebug, "InputHandler", U_("\tWin  On\n")); else MPT_LOG(LogDebug, "InputHandler", U_("\tWin  --\n")); // Feature: use Windows keys as modifier keys
+	MPT_LOG_GLOBAL(LogDebug, "InputHandler", U_("----------------------------------\n"));
+	MPT_LOG_GLOBAL(LogDebug, "InputHandler", m_modifierMask[ModCtrl] ? U_("Ctrl On") : U_("Ctrl --"));
+	MPT_LOG_GLOBAL(LogDebug, "InputHandler", m_modifierMask[ModShift] ? U_("\tShft On") : U_("\tShft --"));
+	MPT_LOG_GLOBAL(LogDebug, "InputHandler", m_modifierMask[ModAlt] ? U_("\tAlt  On") : U_("\tAlt  --"));
+	MPT_LOG_GLOBAL(LogDebug, "InputHandler", m_modifierMask[ModWin] ? U_("\tWin  On\n") : U_("\tWin  --\n"));
 }
 
 
@@ -416,6 +429,7 @@ CString CInputHandler::GetMenuText(UINT id) const
 		{ ID_FILE_SAVEASTEMPLATE, kcFileSaveTemplate,  _T("Sa&ve as Template") },
 		{ ID_FILE_SAVEASWAVE,     kcFileSaveAsWave,    _T("Stream Export (&WAV, FLAC, MP3, etc.)...") },
 		{ ID_FILE_SAVEMIDI,       kcFileSaveMidi,      _T("Export as M&IDI...") },
+		{ ID_FILE_SAVEOPL,        kcFileSaveOPL,       _T("Export O&PL Register Dump...") },
 		{ ID_FILE_SAVECOMPAT,     kcFileExportCompat,  _T("Compatibility &Export...") },
 		{ ID_IMPORT_MIDILIB,      kcFileImportMidiLib, _T("Import &MIDI Library...") },
 		{ ID_ADD_SOUNDBANK,       kcFileAddSoundBank,  _T("Add Sound &Bank...") },
@@ -557,7 +571,7 @@ void CInputHandler::SetNewCommandSet(const CCommandSet *newSet)
 
 bool CInputHandler::SetEffectLetters(const CModSpecifications &modSpecs)
 {
-	MPT_LOG(LogDebug, "InputHandler", U_("Changing command set."));
+	MPT_LOG_GLOBAL(LogDebug, "InputHandler", U_("Changing command set."));
 	bool retval = m_activeCommandSet->QuickChange_SetEffects(modSpecs);
 	if(retval) m_activeCommandSet->GenKeyMap(m_keyMap);
 	return retval;

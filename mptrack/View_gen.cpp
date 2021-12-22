@@ -742,7 +742,8 @@ void CViewGlobals::OnEditColor(const CHANNELINDEX chnMod4)
 	{
 		PrepareUndo(chnMod4);
 		sndFile.ChnSettings[chn].color = *color;
-		modDoc->SetModified();
+		if(modDoc->SupportsChannelColors())
+			modDoc->SetModified();
 		modDoc->UpdateAllViews(nullptr, GeneralHint(chn).Channels());
 	}
 }
@@ -1259,10 +1260,7 @@ void CViewGlobals::UpdateDryWetDisplay()
 		dryRatio = -wetRatio;
 	}
 	int wetInt = mpt::saturate_round<int>(wetRatio * 100), dryInt = mpt::saturate_round<int>(dryRatio * 100);
-	TCHAR s[32];
-	wsprintf(s, _T("%d%% wet, %d%% dry"), wetInt, dryInt);
-	SetDlgItemText(IDC_STATIC8, s);
-
+	SetDlgItemText(IDC_STATIC8, MPT_TFORMAT("{}% wet, {}% dry")(wetInt, dryInt).c_str());
 }
 
 

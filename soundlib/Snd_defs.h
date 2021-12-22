@@ -11,9 +11,9 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
-#include "../common/FlagSet.h"
+#include "openmpt/base/FlagSet.hpp"
 
 
 OPENMPT_NAMESPACE_BEGIN
@@ -43,6 +43,7 @@ using SmpLength = uint32;
 inline constexpr SmpLength MAX_SAMPLE_LENGTH = 0x10000000; // Sample length in frames. Sample size in bytes can be more than this (= 256 MB).
 
 inline constexpr ROWINDEX MAX_PATTERN_ROWS       = 1024;
+inline constexpr ROWINDEX MAX_ROWS_PER_BEAT      = 65536;
 inline constexpr ORDERINDEX MAX_ORDERS           = ORDERINDEX_MAX + 1;
 inline constexpr PATTERNINDEX MAX_PATTERNS       = 4000;
 inline constexpr SAMPLEINDEX MAX_SAMPLES         = 4000;
@@ -268,7 +269,7 @@ enum SongFlags
 };
 DECLARE_FLAGSET(SongFlags)
 
-#define SONG_FILE_FLAGS (SONG_FASTVOLSLIDES|SONG_ITOLDEFFECTS|SONG_ITCOMPATGXX|SONG_LINEARSLIDES|SONG_EXFILTERRANGE|SONG_AMIGALIMITS|SONG_S3MOLDVIBRATO|SONG_PT_MODE|SONG_ISAMIGA)
+#define SONG_FILE_FLAGS (SONG_FASTVOLSLIDES|SONG_ITOLDEFFECTS|SONG_ITCOMPATGXX|SONG_LINEARSLIDES|SONG_EXFILTERRANGE|SONG_AMIGALIMITS|SONG_S3MOLDVIBRATO|SONG_PT_MODE|SONG_ISAMIGA|SONG_IMPORTED)
 #define SONG_PLAY_FLAGS (~SONG_FILE_FLAGS)
 
 // Global Options (Renderer)
@@ -426,7 +427,7 @@ enum PlayBehaviour
 	kFT2VolumeRamping,              // Smooth volume ramping like in FT2 (XM)
 	kMODVBlankTiming,               // F21 and above set speed instead of tempo
 	kSlidesAtSpeed1,                // Execute normal slides at speed 1 as if they were fine slides
-	kHertzInLinearMode,             // Compute note frequency in hertz rather than periods
+	kPeriodsAreHertz,               // Compute note frequency in Hertz rather than periods
 	kTempoClamp,                    // Clamp tempo to 32-255 range.
 	kPerChannelGlobalVolSlide,      // Global volume slide memory is per-channel
 	kPanOverride,                   // Panning commands override surround and random pan variation
@@ -537,6 +538,12 @@ enum PlayBehaviour
 	kOPLRealRetrig,                 // Retrigger effect (Qxy) restarts OPL notes
 	kOPLNoResetAtEnvelopeEnd,       // Do not reset OPL channel status at end of envelope (OpenMPT 1.28 inconsistency with samples)
 	kOPLNoteStopWith0Hz,            // Set note frequency to 0 Hz to "stop" OPL notes
+	kOPLNoteOffOnNoteChange,        // Send note-off events for old note on every note change
+	kFT2PortaResetDirection,        // Reset portamento direction when reaching portamento target from below
+	kApplyUpperPeriodLimit,         // Enforce m_nMaxPeriod
+	kApplyOffsetWithoutNote,        // Offset commands even work when there's no note next to them (e.g. DMF, MDL, PLM formats)
+	kITPitchPanSeparation,          // Pitch/Pan Separation can be overridden by panning commands (this also fixes a bug where any "special" notes affect PPS)
+	kImprecisePingPongLoops,        // Use old (less precise) ping-pong overshoot calculation
 
 	// Add new play behaviours here.
 
@@ -650,8 +657,8 @@ public:
 
 	MPT_CONSTEXPRINLINE FPInt() : v(0) { }
 	MPT_CONSTEXPRINLINE FPInt(T intPart, T fractPart) : v((intPart * fractFact) + (fractPart % fractFact)) { }
-	explicit MPT_CONSTEXPRINLINE FPInt(float f) : v(static_cast<T>(f * float(fractFact))) { }
-	explicit MPT_CONSTEXPRINLINE FPInt(double f) : v(static_cast<T>(f * double(fractFact))) { }
+	explicit MPT_CONSTEXPRINLINE FPInt(float f) : v(mpt::saturate_round<T>(f * float(fractFact))) { }
+	explicit MPT_CONSTEXPRINLINE FPInt(double f) : v(mpt::saturate_round<T>(f * double(fractFact))) { }
 
 	// Set integer and fractional part
 	MPT_CONSTEXPRINLINE FPInt<fractFact, T> &Set(T intPart, T fractPart = 0) { v = (intPart * fractFact) + (fractPart % fractFact); return *this; }

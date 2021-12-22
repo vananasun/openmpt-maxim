@@ -8,8 +8,8 @@
  *
  * This file includes single-block overlap-save convolution processor class.
  *
- * r8brain-free-src Copyright (c) 2013-2019 Aleksey Vaneev
- * See the "License.txt" file for license.
+ * r8brain-free-src Copyright (c) 2013-2021 Aleksey Vaneev
+ * See the "LICENSE" file for license.
  */
 
 #ifndef R8B_CDSPBLOCKCONVOLVER_INCLUDED
@@ -307,7 +307,7 @@ public:
 
 			if( Filter -> isZeroPhase() )
 			{
-				(*fftout) -> multiplyBlocksZ( Filter -> getKernelBlock(),
+				(*fftout) -> multiplyBlocksZP( Filter -> getKernelBlock(),
 					CurInput );
 			}
 			else
@@ -615,7 +615,7 @@ private:
 	 * @param p Spectrum data block to mirror.
 	 */
 
-	template< class T >
+	template< typename T >
 	void mirrorInputSpectrum( T* const p )
 	{
 		const int bl1 = BlockLen2 >> UpShift;

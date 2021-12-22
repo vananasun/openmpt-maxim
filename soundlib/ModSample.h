@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 OPENMPT_NAMESPACE_BEGIN
 
@@ -47,7 +47,7 @@ struct ModSample
 
 	union
 	{
-		SmpLength cues[9];
+		std::array<SmpLength, 9> cues;
 		OPLPatch adlib;
 	};
 
@@ -154,7 +154,7 @@ struct ModSample
 	// Transpose <-> Frequency conversions
 	static uint32 TransposeToFrequency(int transpose, int finetune = 0);
 	void TransposeToFrequency();
-	static int32 FrequencyToTranspose(uint32 freq);
+	static std::pair<int8, int8> FrequencyToTranspose(uint32 freq);
 	void FrequencyToTranspose();
 
 	// Transpose the sample by amount specified in octaves (i.e. amount=1 transposes one octave up)
@@ -163,6 +163,8 @@ struct ModSample
 	// Check if the sample's cue points are the default cue point set.
 	bool HasCustomCuePoints() const;
 	void SetDefaultCuePoints();
+	// Set cue points so that they are suitable for regular offset command extension
+	void Set16BitCuePoints();
 
 	void SetAdlib(bool enable, OPLPatch patch = OPLPatch{{}});
 };

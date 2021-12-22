@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 
 #include "../common/FileReaderFwd.h"
@@ -65,7 +65,6 @@ public:
 		DMF,                // DMF Huffman compression
 		MDL,                // MDL Huffman compression
 		PTM8Dto16,          // PTM 8-Bit delta value -> 16-Bit sample
-		PCM7to8,            // 8-Bit sample data with unused high bit
 		ADPCM,              // 4-Bit ADPCM-packed
 		MT2,                // MadTracker 2 stereo delta encoding
 		floatPCM15,         // Floating point PCM with 2^15 full scale
@@ -156,8 +155,6 @@ public:
 
 			case PTM8Dto16: // PTM 8-Bit delta value -> 16-Bit sample
 				return 16;
-			case PCM7to8:   // 8-Bit sample data with unused high bit
-				return 8;
 			case ADPCM:     // 4-Bit ADPCM-packed
 				return 4;
 			case uLaw:      // G.711 u-law
@@ -188,7 +185,7 @@ public:
 		return GetEncodedBitsPerSample() == 0;
 	}
 
-	// Returns true if the decoder for a given format uses FileReader interface and thus do not need to call GetPinnedRawDataView()
+	// Returns true if the decoder for a given format uses FileReader interface and thus do not need to call GetPinnedView()
 	MPT_CONSTEXPRINLINE bool UsesFileReaderForDecoding() const
 	{
 		switch(GetEncoding())

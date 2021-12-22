@@ -14,6 +14,9 @@
 #include "Loaders.h"
 #include "Tables.h"
 #ifndef MODPLUG_NO_FILESAVE
+#include "mpt/io/base.hpp"
+#include "mpt/io/io.hpp"
+#include "mpt/io/io_stdstream.hpp"
 #include "../common/mptFileIO.h"
 #endif
 #ifdef MPT_EXTERNAL_SAMPLES
@@ -54,7 +57,7 @@ void CSoundFile::ConvertModCommand(ModCommand &m)
 		break;
 
 	// Extension for XM extended effects
-	case 'G' - 55:	m.command = CMD_GLOBALVOLUME; break;		//16
+	case 'G' - 55:	m.command = CMD_GLOBALVOLUME; break;  //16
 	case 'H' - 55:	m.command = CMD_GLOBALVOLSLIDE; break;
 	case 'K' - 55:	m.command = CMD_KEYOFF; break;
 	case 'L' - 55:	m.command = CMD_SETENVPOSITION; break;
@@ -63,11 +66,11 @@ void CSoundFile::ConvertModCommand(ModCommand &m)
 	case 'T' - 55:	m.command = CMD_TREMOR; break;
 	case 'W' - 55:	m.command = CMD_DUMMY; break;
 	case 'X' - 55:	m.command = CMD_XFINEPORTAUPDOWN;	break;
-	case 'Y' - 55:	m.command = CMD_PANBRELLO; break;			//34
-	case 'Z' - 55:	m.command = CMD_MIDI;	break;				//35
-	case '\\' - 56:	m.command = CMD_SMOOTHMIDI;	break;		//rewbs.smoothVST: 36 - note: this is actually displayed as "-" in FT2, but seems to be doing nothing.
-	//case ':' - 21:	m.command = CMD_DELAYCUT;	break;		//37
-	case '#' + 3:	m.command = CMD_XPARAM;	break;			//rewbs.XMfixes - Xm.param is 38
+	case 'Y' - 55:	m.command = CMD_PANBRELLO; break;   // 34
+	case 'Z' - 55:	m.command = CMD_MIDI; break;        // 35
+	case '\\' - 56:	m.command = CMD_SMOOTHMIDI; break;  // 36 - note: this is actually displayed as "-" in FT2, but seems to be doing nothing.
+	case 37:		m.command = CMD_SMOOTHMIDI; break;  // BeRoTracker uses this for smooth MIDI macros for some reason; in old OpenMPT versions this was reserved for the unimplemented "velocity" command
+	case '#' + 3:	m.command = CMD_XPARAM; break;      // 38
 	default:		m.command = CMD_NONE;
 	}
 }
@@ -449,6 +452,8 @@ struct AMInstrument
 			pitchEnv.dwFlags.set(ENV_ENABLED);
 			pitchEnv.reserve(2);
 			pitchEnv.push_back(0, ENVELOPE_MID);
+			// cppcheck false-positive
+			// cppcheck-suppress zerodiv
 			pitchEnv.push_back(static_cast<EnvelopeNode::tick_t>(1024 / abs(pitchFall)), pitchFall > 0 ? ENVELOPE_MIN : ENVELOPE_MAX);
 		}
 	}
@@ -552,7 +557,7 @@ static bool ValidateMODPatternData(TFileReader &file, const uint32 threshold, co
 
 
 // Parse the order list to determine how many patterns are used in the file.
-static PATTERNINDEX GetNumPatterns(FileReader &file, ModSequence &Order, ORDERINDEX numOrders, SmpLength totalSampleLen, CHANNELINDEX &numChannels, SmpLength wowSampleLen = 0)
+static PATTERNINDEX GetNumPatterns(FileReader &file, ModSequence &Order, ORDERINDEX numOrders, SmpLength totalSampleLen, CHANNELINDEX &numChannels, SmpLength wowSampleLen, bool validateHiddenPatterns)
 {
 	PATTERNINDEX numPatterns = 0;         // Total number of patterns in file (determined by going through the whole order list) with pattern number < 128
 	PATTERNINDEX officialPatterns = 0;    // Number of patterns only found in the "official" part of the order list (i.e. order positions < claimed order length)
@@ -590,7 +595,7 @@ static PATTERNINDEX GetNumPatterns(FileReader &file, ModSequence &Order, ORDERIN
 		if(ValidateMODPatternData(file, 16, true))
 			numChannels = 8;
 		file.Seek(patternStartOffset);
-	} else if(numPatterns != officialPatterns && numChannels == 4 && !wowSampleLen)
+	} else if(numPatterns != officialPatterns && validateHiddenPatterns)
 	{
 		// Fix SoundTracker modules where "hidden" patterns should be ignored.
 		// razor-1911.mod (MD5 b75f0f471b0ae400185585ca05bf7fe8, SHA1 4de31af234229faec00f1e85e1e8f78f405d454b)
@@ -688,6 +693,7 @@ struct MODMagicResult
 {
 	const mpt::uchar *madeWithTracker = nullptr;
 	uint32 invalidByteThreshold = MODSampleHeader::INVALID_BYTE_THRESHOLD;
+	uint16 patternDataOffset    = 1084;
 	CHANNELINDEX numChannels    = 0;
 	bool isNoiseTracker         = false;
 	bool isStartrekker          = false;
@@ -736,6 +742,8 @@ static bool CheckMODMagic(const char magic[4], MODMagicResult &result)
 		// Digital Tracker on Atari Falcon
 		result.madeWithTracker = UL_("Digital Tracker");
 		result.numChannels = magic[3] - '0';
+		// Digital Tracker MODs contain four bytes (00 40 00 00) right after the magic bytes which don't seem to do anything special.
+		result.patternDataOffset = 1088;
 	} else if((!memcmp(magic, "FLT", 3) || !memcmp(magic, "EXO", 3)) && magic[3] >= '4' && magic[3] <= '9')
 	{
 		// FLTx / EXOx - Startrekker by Exolon / Fairlight
@@ -756,9 +764,9 @@ static bool CheckMODMagic(const char magic[4], MODMagicResult &result)
 		result.madeWithTracker = UL_("Generic MOD-compatible Tracker");
 		result.isGenericMultiChannel = true;
 		result.numChannels = (magic[0] - '0') * 10 + magic[1] - '0';
-	} else if(!memcmp(magic, "TDZ", 3) && magic[3] >= '4' && magic[3] <= '9')
+	} else if(!memcmp(magic, "TDZ", 3) && magic[3] >= '1' && magic[3] <= '9')
 	{
-		// TDZx - TakeTracker
+		// TDZx - TakeTracker (only TDZ1-TDZ3 should exist, but historically this code only supported 4-9 channels, so we keep those for the unlikely case that they were actually used for something)
 		result.madeWithTracker = UL_("TakeTracker");
 		result.numChannels = magic[3] - '0';
 	} else
@@ -833,6 +841,8 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 	bool isInconexia = IsMagic(magic, "M\0\0\0") || IsMagic(magic, "8\0\0\0");
 	// A loop length of zero will freeze ProTracker, so assume that modules having such a value were not meant to be played on Amiga. Fixes LHS_MI.MOD
 	bool hasRepLen0 = false;
+	// Empty sample slots typically should have a default volume of 0 in ProTracker
+	bool hasEmptySampleWithVolume = false;
 	if(modMagicResult.setMODVBlankTiming)
 	{
 		m_playBehaviour.set(kMODVBlankTiming);
@@ -867,7 +877,9 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 		
 		if(sampleHeader.length && !sampleHeader.loopLength)
 			hasRepLen0 = true;
-		
+		else if(!sampleHeader.length && sampleHeader.volume == 64)
+			hasEmptySampleWithVolume = true;
+
 		if(maybeWOW)
 		{
 			// Some WOW files rely on sample length 1 being counted as well
@@ -888,7 +900,8 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 	// Read order information
 	MODFileHeader fileHeader;
 	file.ReadStruct(fileHeader);
-	file.Skip(4);  // Magic bytes (we already parsed these)
+
+	file.Seek(modMagicResult.patternDataOffset);
 
 	if(fileHeader.restartPos > 0)
 		maybeWOW = false;
@@ -913,7 +926,7 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 	}
 
 	// Get number of patterns (including some order list sanity checks)
-	PATTERNINDEX numPatterns = GetNumPatterns(file, Order(), realOrders, totalSampleLen, m_nChannels, wowSampleLen);
+	PATTERNINDEX numPatterns = GetNumPatterns(file, Order(), realOrders, totalSampleLen, m_nChannels, wowSampleLen, false);
 	if(maybeWOW && GetNumChannels() == 8)
 	{
 		// M.K. with 8 channels = Mod's Grave
@@ -1006,7 +1019,7 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 		}
 		fix7BitPanning = leftPanning && !extendedPanning && maxPanning >= ENABLE_MOD_PANNING_THRESHOLD;
 	}
-	file.Seek(1084);
+	file.Seek(modMagicResult.patternDataOffset);
 
 	const CHANNELINDEX readChannels = (isFLT8 ? 4 : m_nChannels); // 4 channels per pattern in FLT8 format.
 	if(isFLT8) numPatterns++; // as one logical pattern consists of two real patterns in FLT8 format, the highest pattern number has to be increased by one.
@@ -1153,7 +1166,7 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 		}
 	} else if(!onlyAmigaNotes && fileHeader.restartPos == 0x7F && isMdKd && fileHeader.restartPos + 1u >= realOrders)
 	{
-		modMagicResult.madeWithTracker = UL_("ScreamTracker");
+		modMagicResult.madeWithTracker = UL_("Scream Tracker");
 	}
 
 	if(onlyAmigaNotes && !isGenericMultiChannel && filterTransitions < 7)
@@ -1172,7 +1185,7 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 	// Reading samples
 	if(loadFlags & loadSampleData)
 	{
-		file.Seek(1084 + (readChannels * 64 * 4) * numPatterns);
+		file.Seek(modMagicResult.patternDataOffset + (readChannels * 64 * 4) * numPatterns);
 		for(SAMPLEINDEX smp = 1; smp <= 31; smp++)
 		{
 			ModSample &sample = Samples[smp];
@@ -1193,8 +1206,11 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 				// Fix sample 6 in MOD.shorttune2, which has a replen longer than the sample itself.
 				// ProTracker reads beyond the end of the sample when playing. Normally samples are
 				// adjacent in PT's memory, so we simply read into the next sample in the file.
+				// On the other hand, the loop points in Purple Motions's SOUL-O-M.MOD are completely broken and shouldn't be treated like this.
+				// As it was most likely written in Scream Tracker, it has empty sample slots with a default volume of 64, which we use for
+				// rejecting this quirk for that file.
 				FileReader::off_t nextSample = file.GetPosition() + sampleIO.CalculateEncodedSize(sample.nLength);
-				if(isMdKd && onlyAmigaNotes)
+				if(isMdKd && onlyAmigaNotes && !hasEmptySampleWithVolume)
 					sample.nLength = std::max(sample.nLength, sample.nLoopEnd);
 
 				sampleIO.ReadSample(sample, file);
@@ -1274,7 +1290,7 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 	}
 #endif  // MPT_EXTERNAL_SAMPLES || MPT_BUILD_FUZZER
 
-	// Fix VBlank MODs. Arbitrary threshold: 10 minutes.
+	// Fix VBlank MODs. Arbitrary threshold: 9 minutes (enough for Guitar Slinger...).
 	// Basically, this just converts all tempo commands into speed commands
 	// for MODs which are supposed to have VBlank timing (instead of CIA timing).
 	// There is no perfect way to do this, since both MOD types look the same,
@@ -1287,7 +1303,7 @@ bool CSoundFile::ReadMOD(FileReader &file, ModLoadingFlags loadFlags)
 	if(isMdKd && hasTempoCommands && !definitelyCIA)
 	{
 		const double songTime = GetLength(eNoAdjust).front().duration;
-		if(songTime >= 600.0)
+		if(songTime >= 540.0)
 		{
 			m_playBehaviour.set(kMODVBlankTiming);
 			if(GetLength(eNoAdjust, GetLengthTarget(songTime)).front().targetReached)
@@ -1515,7 +1531,7 @@ bool CSoundFile::ReadM15(FileReader &file, ModLoadingFlags loadFlags)
 	file.ReadStruct(fileHeader);
 
 	ReadOrderFromArray(Order(), fileHeader.orderList);
-	PATTERNINDEX numPatterns = GetNumPatterns(file, Order(), fileHeader.numOrders, totalSampleLen, m_nChannels);
+	PATTERNINDEX numPatterns = GetNumPatterns(file, Order(), fileHeader.numOrders, totalSampleLen, m_nChannels, 0, true);
 
 	// Most likely just a file with lots of NULs at the start
 	if(fileHeader.restartPos == 0 && fileHeader.numOrders == 0 && numPatterns <= 1)
@@ -2173,8 +2189,8 @@ bool CSoundFile::ReadPT36(FileReader &file, ModLoadingFlags loadFlags)
 		if(info.name[0])
 			m_songName = mpt::String::ReadBuf(mpt::String::maybeNullTerminated, info.name);
 
-		if(IsInRange(info.dateMonth, 1, 12) && IsInRange(info.dateDay, 1, 31) && IsInRange(info.dateHour, 0, 23)
-		   && IsInRange(info.dateMinute, 0, 59) && IsInRange(info.dateSecond, 0, 59))
+		if(mpt::is_in_range(info.dateMonth, 1, 12) && mpt::is_in_range(info.dateDay, 1, 31) && mpt::is_in_range(info.dateHour, 0, 23)
+		   && mpt::is_in_range(info.dateMinute, 0, 59) && mpt::is_in_range(info.dateSecond, 0, 59))
 		{
 			FileHistory mptHistory;
 			mptHistory.loadDate.tm_year = info.dateYear;
@@ -2205,7 +2221,7 @@ bool CSoundFile::ReadPT36(FileReader &file, ModLoadingFlags loadFlags)
 	m_SongFlags.set(SONG_PT_MODE);
 	m_playBehaviour.set(kMODIgnorePanning);
 	m_playBehaviour.set(kMODOneShotLoops);
-	m_playBehaviour.set(kMODSampleSwap);
+	m_playBehaviour.reset(kMODSampleSwap);
 
 	return ok;
 }

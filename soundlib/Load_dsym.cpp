@@ -47,7 +47,7 @@ static std::vector<std::byte> DecompressDSymLZW(FileReader &file, uint32 size)
 	BitReader bitFile(file);
 	const auto startPos = bitFile.GetPosition();
 
-	// In the best case, 9 bits decode 8192 bytes, a ratio of approximately 1:7282.
+	// In the best case, 13 bits decode 8192 bytes, a ratio of approximately 1:5042.
 	// Too much for reserving memory in case of malformed files, just choose an arbitrary but realistic upper limit.
 	std::vector<std::byte> output;
 	output.reserve(std::min(size, std::min(mpt::saturate_cast<uint32>(file.BytesLeft()), Util::MaxValueOfType(size) / 50u) * 50u));
@@ -130,7 +130,7 @@ static std::vector<std::byte> DecompressDSymLZW(FileReader &file, uint32 size)
 
 static std::vector<std::byte> DecompressDSymSigmaDelta(FileReader &file, uint32 size)
 {
-	const uint8 maxRunLength = file.ReadUint8();
+	const uint8 maxRunLength = std::max(file.ReadUint8(), uint8(1));
 
 	BitReader bitFile(file);
 	const auto startPos = bitFile.GetPosition();
@@ -141,7 +141,7 @@ static std::vector<std::byte> DecompressDSymSigmaDelta(FileReader &file, uint32 
 	std::vector<std::byte> output(size);
 
 	uint32 pos = 0;
-	uint8 runLength = 0;
+	uint8 runLength = maxRunLength;
 	uint8 numBits = 8;
 	uint8 accum = static_cast<uint8>(bitFile.ReadBits(numBits));
 	output[pos++] = mpt::byte_cast<std::byte>(accum);
@@ -155,7 +155,7 @@ static std::vector<std::byte> DecompressDSymSigmaDelta(FileReader &file, uint32 
 			if(numBits >= 9)
 				break;
 			numBits++;
-			runLength = 0;
+			runLength = maxRunLength;
 			continue;
 		}
 
@@ -165,17 +165,18 @@ static std::vector<std::byte> DecompressDSymSigmaDelta(FileReader &file, uint32 
 			accum += static_cast<uint8>(value >> 1);
 		output[pos++] = mpt::byte_cast<std::byte>(accum);
 
-		if((value << 1) >= (1u << numBits))
+		// Reset run length if high bit is set
+		if((value >> (numBits - 1u)) != 0)
 		{
-			runLength = 0;
+			runLength = maxRunLength;
 			continue;
 		}
 		// Decrease bit width
-		if(++runLength >= maxRunLength)
+		if(--runLength == 0)
 		{
 			if(numBits > 1)
 				numBits--;
-			runLength = 0;
+			runLength = maxRunLength;
 		}
 	}
 
@@ -185,10 +186,27 @@ static std::vector<std::byte> DecompressDSymSigmaDelta(FileReader &file, uint32 
 }
 
 
-static uint32 ReadDSym24Bit(FileReader &file)
+static bool ReadDSymChunk(FileReader &file, std::vector<std::byte> &data, uint32 size)
 {
-	const auto val = file.ReadArray<uint8, 3>();
-	return (val[0] << 1) | (val[1] << 9) | (val[2] << 17);
+	const uint8 packingType = file.ReadUint8();
+	if(packingType > 1)
+		return false;
+	if(packingType)
+	{
+		try
+		{
+			data = DecompressDSymLZW(file, size);
+		} catch(const BitReader::eof &)
+		{
+			return false;
+		}
+	} else
+	{
+		if(!file.CanRead(size))
+			return false;
+		file.ReadVector(data, size);
+	}
+	return data.size() >= size;
 }
 
 
@@ -216,7 +234,7 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 		return true;
 
 	InitializeGlobals(MOD_TYPE_MOD);
-	m_SongFlags.set(SONG_IMPORTED);
+	m_SongFlags.set(SONG_IMPORTED | SONG_AMIGALIMITS);
 	m_SongFlags.reset(SONG_ISAMIGA);
 	m_nChannels = fileHeader.numChannels;
 	m_nSamples = 63;
@@ -233,7 +251,7 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 		Samples[smp].Initialize(MOD_TYPE_MOD);
 		sampleNameLength[smp] = file.ReadUint8();
 		if(!(sampleNameLength[smp] & 0x80))
-			Samples[smp].nLength = ReadDSym24Bit(file);
+			Samples[smp].nLength = file.ReadUint24LE() << 1;
 	}
 
 	file.ReadSizedString<uint8le, mpt::String::spacePadded>(m_songName);
@@ -244,41 +262,23 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 	if(fileHeader.numOrders)
 	{
 		const uint32 sequenceSize = fileHeader.numOrders * fileHeader.numChannels * 2u;
-		const uint8 packingType = file.ReadUint8();
-		if(packingType > 1)
+		if(!ReadDSymChunk(file, sequenceData, sequenceSize))
 			return false;
-		if(packingType)
-			sequenceData = DecompressDSymLZW(file, sequenceSize);
-		else
-			file.ReadVector(sequenceData, sequenceSize);
 	}
 	const auto sequence = mpt::as_span(reinterpret_cast<uint16le *>(sequenceData.data()), sequenceData.size() / 2u);
-	if(sequence.size() < fileHeader.numOrders * static_cast<size_t>(m_nChannels))
-		return false;
 
 	std::vector<std::byte> trackData;
-	if(fileHeader.numTracks)
+	trackData.reserve(fileHeader.numTracks * 256u);
+	// For some reason, patterns are stored in 512K chunks
+	for(uint16 offset = 0; offset < fileHeader.numTracks; offset += 2000)
 	{
-		trackData.reserve(fileHeader.numTracks * 256u);
-		// For some reason, patterns are stored in 512K chunks
-		for(uint16 offset = 0; offset < fileHeader.numTracks; offset += 2000)
-		{
-			const uint32 chunkSize = std::min(fileHeader.numTracks - offset, 2000) * 256;
-			std::vector<std::byte> chunk;
-			const uint8 packingType = file.ReadUint8();
-			if(packingType > 1)
-				return false;
-			if(packingType)
-				trackData = DecompressDSymLZW(file, chunkSize);
-			else
-				file.ReadVector(chunk, chunkSize);
-
-			trackData.insert(trackData.end(), chunk.begin(), chunk.end());
-		}
+		const uint32 chunkSize = std::min(fileHeader.numTracks - offset, 2000) * 256;
+		std::vector<std::byte> chunk;
+		if(!ReadDSymChunk(file, chunk, chunkSize))
+			return false;
+		trackData.insert(trackData.end(), chunk.begin(), chunk.end());
 	}
 	const auto tracks = mpt::byte_cast<mpt::span<uint8>>(mpt::as_span(trackData));
-	if(tracks.size() < fileHeader.numTracks * 256u)
-		return false;
 
 	Order().resize(fileHeader.numOrders);
 	for(ORDERINDEX pat = 0; pat < fileHeader.numOrders; pat++)
@@ -339,7 +339,12 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 						break;
 					case 0x09:  // 09 xxx Set Sample Offset
 						m->command = CMD_OFFSET;
-						m->param = mpt::saturate_cast<ModCommand::PARAM>(param >> 1);
+						m->param = static_cast<ModCommand::PARAM>(param >> 1);
+						if(param >= 0x200)
+						{
+							m->volcmd = VOLCMD_OFFSET;
+							m->vol >>= 1;
+						}
 						break;
 					case 0x0A:  // 0A xyz Volume Slide + Fine Slide Up
 					case 0x2A:  // 2A xyz Volume Slide + Fine Slide Down
@@ -377,6 +382,7 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 					case 0x14:  // 14 xxy Set Vibrato Waveform
 					case 0x15:  // 15 xxy Set Fine Tune
 					case 0x17:  // 17 xxy Set Tremolo Waveform
+					case 0x1F:  // 1F xxy Invert Loop
 						m->command = CMD_MODCMDEX;
 						m->param = (command << 4) | (m->param & 0x0F);
 						break;
@@ -387,10 +393,6 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 					case 0x1E:  // 1E xxx Pattern Delay
 						m->command = CMD_MODCMDEX;
 						m->param = (command << 4) | static_cast<ModCommand::PARAM>(std::min(param, uint16(0x0F)));
-						break;
-					case 0x1F:  // 1F xxy Invert Loop
-						m->command = CMD_MODCMDEX;
-						m->param = (param & 0x0F) ? 0xFF : 0xF0;
 						break;
 					case 0x11:  // 11 xyy Fine Slide Up + Fine Volume Slide Up
 					case 0x12:  // 12 xyy Fine Slide Down + Fine Volume Slide Up
@@ -430,11 +432,11 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 						break;
 					case 0x30:  // 30 xxy Set Stereo
 						m->command = CMD_PANNING8;
-						if((param & 7) && !(param & 8))
+						if(param & 7)
 						{
 							static constexpr uint8 panning[8] = {0x00, 0x00, 0x2B, 0x56, 0x80, 0xAA, 0xD4, 0xFF};
 							m->param = panning[param & 7];
-						} else if(!(param & 7) && (param >> 4) != 0x80)
+						} else if((param >> 4) != 0x80)
 						{
 							m->param = static_cast<ModCommand::PARAM>(param >> 4);
 							if(m->param < 0x80)
@@ -471,14 +473,15 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 			continue;
 
 		ModSample &mptSmp = Samples[smp];
-		mptSmp.nSustainStart = ReadDSym24Bit(file);
-		if(const auto loopLen = ReadDSym24Bit(file); loopLen > 2)
+		mptSmp.nSustainStart = file.ReadUint24LE() << 1;
+		if(const auto loopLen = file.ReadUint24LE() << 1; loopLen > 2)
 		{
 			mptSmp.nSustainEnd = mptSmp.nSustainStart + loopLen;
 			mptSmp.uFlags.set(CHN_SUSTAINLOOP);
 		}
-		mptSmp.nVolume = file.ReadUint8() * 4u;
+		mptSmp.nVolume = std::min(file.ReadUint8(), uint8(64)) * 4u;
 		mptSmp.nFineTune = MOD2XMFineTune(file.ReadUint8());
+		mptSmp.Set16BitCuePoints();
 
 		if(!mptSmp.nLength)
 			continue;
@@ -490,15 +493,17 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 			if(loadFlags & loadSampleData)
 			{
 				std::vector<std::byte> sampleData;
+				if(!file.CanRead(mptSmp.nLength))
+					return false;
 				file.ReadVector(sampleData, mptSmp.nLength);
 				for(auto &b : sampleData)
 				{
 					uint8 v = mpt::byte_cast<uint8>(b);
-					v = (v << 7) | (((~v) & 0xFE) >> 1);
+					v = (v << 7) | (static_cast<uint8>(~v) >> 1);
 					b = mpt::byte_cast<std::byte>(v);
 				}
 
-				FileReader sampleDataFile = mpt::as_span(sampleData);
+				FileReader sampleDataFile = FileReader(mpt::as_span(sampleData));
 				SampleIO(
 					SampleIO::_16bit,
 					SampleIO::mono,
@@ -512,10 +517,17 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 			break;
 		case 1:  // 13-bit LZW applied to linear sample data differences
 			{
-				auto sampleData = DecompressDSymLZW(file, mptSmp.nLength);
+				std::vector<std::byte> sampleData;
+				try
+				{
+					sampleData = DecompressDSymLZW(file, mptSmp.nLength);
+				} catch(const BitReader::eof &)
+				{
+					return false;
+				}
 				if(!(loadFlags & loadSampleData))
 					break;
-				FileReader sampleDataFile = mpt::as_span(sampleData);
+				FileReader sampleDataFile = FileReader(mpt::as_span(sampleData));
 				SampleIO(
 					SampleIO::_8bit,
 					SampleIO::mono,
@@ -542,7 +554,14 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 		case 4:  // Sigma-Delta compression applied to linear sample differences
 		case 5:  // Sigma-Delta compression applied to logarithmic sample differences
 			{
-				auto sampleData = DecompressDSymSigmaDelta(file, mptSmp.nLength);
+				std::vector<std::byte> sampleData;
+				try
+				{
+					sampleData = DecompressDSymSigmaDelta(file, mptSmp.nLength);
+				} catch(const BitReader::eof &)
+				{
+					return false;
+				}
 				if(!(loadFlags & loadSampleData))
 					break;
 				if(packingType == 5)
@@ -556,7 +575,7 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 					}
 				}
 
-				FileReader sampleDataFile = mpt::as_span(sampleData);
+				FileReader sampleDataFile = FileReader(mpt::as_span(sampleData));
 				SampleIO(
 					(packingType == 5) ? SampleIO::_16bit : SampleIO::_8bit,
 					SampleIO::mono,
@@ -570,21 +589,17 @@ bool CSoundFile::ReadDSym(FileReader &file, ModLoadingFlags loadFlags)
 		}
 	}
 
-	const uint32 infoLen = fileHeader.infoLenLo | (fileHeader.infoLenHi << 16);
-	if(infoLen)
+	if(const uint32 infoLen = fileHeader.infoLenLo | (fileHeader.infoLenHi << 16); infoLen > 0)
 	{
 		std::vector<std::byte> infoData;
-		FileReader infoChunk;
-		const uint8 packingType = file.ReadUint8();
-		if(packingType)
-			infoChunk = mpt::as_span(infoData = DecompressDSymLZW(file, infoLen));
-		else
-			infoChunk = file.ReadChunk(infoLen);
+		if(!ReadDSymChunk(file, infoData, infoLen))
+			return false;
+		FileReader infoChunk = FileReader(mpt::as_span(infoData));
 		m_songMessage.Read(infoChunk, infoLen, SongMessage::leLF);
 	}
 
 	m_modFormat.formatName = MPT_UFORMAT("Digital Symphony v{}")(fileHeader.version);
-	m_modFormat.type = U_("digitalsymphony");  // RISC OS doesn't use file extensions
+	m_modFormat.type = U_("dsym");  // RISC OS doesn't use file extensions but this is a common abbreviation used for this tracker
 	m_modFormat.madeWithTracker = U_("Digital Symphony");
 	m_modFormat.charset = mpt::Charset::ISO8859_1;  // Close enough (RISC OS uses slightly customized variant)
 

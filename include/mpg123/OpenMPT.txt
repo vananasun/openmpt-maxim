@@ -1,9 +1,13 @@
-libmpg123 library version 1.26.5.
+libmpg123 library version 1.29.3 (2021-12-11).
 The following changes have been made:
 - ports/makefile/config.h and ports/makefile/mpg123.h have been added for plain
   Makefile builds.
-- DEBUG build format string type mismatches in frame.c have benn fixed.
-- DEBUG build format string type mismatches in id3.c have benn fixed.
+- ports/MSVC++/config.h and ports/MSVC++/mpg123.h have been retained from older
+  versions.
+- ports/Xcode/config.h and ports/MSVC++/mpg123.h have been retained from older
+  versions.
+- ports/MSVC++/mpg123.h has been adjusted to provide mpg123_ssize_t and define
+  MPG123_NO_LARGENAME.
 - Modifications are marked by // OpenMPT.
 - Obviously, unnecessary folders and files have been removed.
 - For building, premake is used to generate Visual Studio project files.

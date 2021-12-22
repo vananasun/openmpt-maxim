@@ -453,7 +453,7 @@ static void process_text(mpg123_handle *fr, unsigned char *realdata, size_t real
 		if(NOQUIET) error("Unable to attach new text!");
 		return;
 	}
-	mdebug("process_text: (over)writing entry with ID %s", t->id
+	mdebug("process_text: (over)writing entry with ID %s", t->id[0]
 	?	(char[5]) { t->id[0], t->id[1], t->id[2], t->id[3], 0 }
 	:	"(nil)" );
 	memcpy(t->id, id, 4);
@@ -1214,11 +1214,7 @@ int parse_new_id3(mpg123_handle *fr, unsigned long first4bytes)
 									if(fr->rva.level[rva_mode] <= rva2+1)
 									{
 										pos += strlen((char*) realdata) + 1;
-#if 0  // OpenMPT
-										debug2("got my pos: %zu - %zu", realsize, pos);
-#else  // OpenMPT
-										debug2("got my pos: %lu - %lu", realsize, pos);  // OpenMPT
-#endif  // OpenMPT
+										debug2("got my pos: %lu - %lu", realsize, pos);
 										// channel and two bytes for RVA value
 										// pos possibly just past the safety zero, so one more than realsize
 										if(pos > realsize || realsize-pos < 3)
@@ -1349,28 +1345,23 @@ static void convert_latin1(mpg123_string *sb, const unsigned char* s, size_t l, 
 */
 static int check_bom(const unsigned char** source, size_t *len)
 {
-	int this_bom    = 0;
-	int further_bom = 0;
+	int last_bom = 0;
 
-	if(*len < 2) return 0;
-
-	if((*source)[0] == 0xff && (*source)[1] == 0xfe)
-	this_bom = -1;
-
-	if((*source)[0] == 0xfe && (*source)[1] == 0xff)
-	this_bom = 1;
-
-	/* Skip the detected BOM. */
-	if(this_bom != 0)
+	while(*len >= 2)
 	{
+		int this_bom = 0;
+		if((*source)[0] == 0xff && (*source)[1] == 0xfe)
+			this_bom = -1;
+		if((*source)[0] == 0xfe && (*source)[1] == 0xff)
+			this_bom = 1;
+		if(this_bom == 0)
+			break;
+		/* Skip the detected BOM. */
+		last_bom = this_bom;
 		*source += 2;
 		*len    -= 2;
-		/* Check for following BOMs. The last one wins! */
-		further_bom = check_bom(source, len);
-		if(further_bom == 0) return this_bom; /* End of the recursion. */
-		else                 return further_bom;
 	}
-	else return 0;
+	return last_bom;
 }
 
 #define FULLPOINT(f,s) ( (((f)&0x3ff)<<10) + ((s)&0x3ff) + 0x10000 )

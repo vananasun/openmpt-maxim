@@ -12,10 +12,10 @@
 #include "Mptrack.h"
 #include "Mainfrm.h"
 #include "ModDocTemplate.h"
-#include "../sounddev/SoundDevice.h"
-#include "../sounddev/SoundDeviceManager.h"
+#include "openmpt/sounddevice/SoundDevice.hpp"
+#include "openmpt/sounddevice/SoundDeviceBuffer.hpp"
+#include "openmpt/sounddevice/SoundDeviceManager.hpp"
 #include "../soundlib/AudioReadTarget.h"
-#include "../sounddev/SoundDeviceBuffer.h"
 #include "ImageLists.h"
 #include "Moddoc.h"
 #include "Childfrm.h"
@@ -49,19 +49,12 @@
 #include "ProgressDialog.h"
 #include <HtmlHelp.h>
 #include <Dbt.h>  // device change messages
+#include "mpt/audio/span.hpp"
 #ifdef MPT_WITH_APC
 #include "APC/APC.h"
 #endif
 #ifdef MPT_WITH_REWIRE
 #include "../sounddev/SoundDeviceReWire.h"
-#endif
-
-
-
-#ifdef _DEBUG
-#define new DEBUG_NEW
-#undef THIS_FILE
-static char THIS_FILE[] = __FILE__;
 #endif
 
 
@@ -120,7 +113,11 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWnd)
 	ON_MESSAGE(WM_MOD_MIDIMAPPING,			&CMainFrame::OnViewMIDIMapping)
 	ON_MESSAGE(WM_MOD_UPDATEVIEWS,			&CMainFrame::OnUpdateViews)
 	ON_MESSAGE(WM_MOD_SETMODIFIED,			&CMainFrame::OnSetModified)
+#if defined(MPT_ENABLE_UPDATE)
+	ON_MESSAGE(WM_MOD_UPDATENOTIFY,			&CMainFrame::OnToolbarUpdateIndicatorClick)
+#endif // MPT_ENABLE_UPDATE
 	ON_COMMAND(ID_INTERNETUPDATE,			&CMainFrame::OnInternetUpdate)
+	ON_COMMAND(ID_UPDATE_AVAILABLE,			&CMainFrame::OnUpdateAvailable)
 	ON_COMMAND(ID_HELP_SHOWSETTINGSFOLDER,	&CMainFrame::OnShowSettingsFolder)
 #if defined(MPT_ENABLE_UPDATE)
 	ON_MESSAGE(MPT_WM_APP_UPDATECHECK_START, &CMainFrame::OnUpdateCheckStart)
@@ -178,8 +175,8 @@ static UINT indicators[] =
 /////////////////////////////////////////////////////////////////////////////
 // CMainFrame construction/destruction
 CMainFrame::CMainFrame()
-	: m_SoundDeviceFillBufferCriticalSection(CriticalSection::InitialState::Unlocked)
-	, m_Dither(theApp.PRNG())
+	: SoundDevice::CallbackBufferHandler<DithersOpenMPT>(theApp.PRNG())
+	, m_SoundDeviceFillBufferCriticalSection(CriticalSection::InitialState::Unlocked)
 {
 	m_szUserText[0] = 0;
 	m_szInfoText[0] = 0;
@@ -204,7 +201,7 @@ void CMainFrame::Initialize()
 	{
 		title += _T(" DEBUG");
 	}
-	#ifdef NO_VST
+	#ifndef MPT_WITH_VST
 		title += _T(" NO_VST");
 	#endif
 	#ifndef MPT_WITH_DMO
@@ -311,7 +308,14 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 	if(TrackerSettings::Instance().m_dwMidiSetup & MIDISETUP_ENABLE_RECORD_DEFAULT) midiOpenDevice(false);
 
+#if MPT_COMPILER_MSVC
+#pragma warning(push)
+#pragma warning(disable:6387) // '_Param_(2)' could be '0':  this does not adhere to the specification for the function 'HtmlHelpW'
+#endif
 	::HtmlHelp(m_hWnd, nullptr, HH_INITIALIZE, reinterpret_cast<DWORD_PTR>(&helpCookie));
+#if MPT_COMPILER_MSVC
+#pragma warning(pop)
+#endif
 
 	return 0;
 }
@@ -325,7 +329,14 @@ BOOL CMainFrame::PreCreateWindow(CREATESTRUCT& cs)
 
 BOOL CMainFrame::DestroyWindow()
 {
+#if MPT_COMPILER_MSVC
+#pragma warning(push)
+#pragma warning(disable:6387) // '_Param_(2)' could be '0':  this does not adhere to the specification for the function 'HtmlHelpW'
+#endif
 	::HtmlHelp(m_hWnd, nullptr, HH_UNINITIALIZE, reinterpret_cast<DWORD_PTR>(&helpCookie));
+#if MPT_COMPILER_MSVC
+#pragma warning(pop)
+#endif
 
 	// Uninstall Keyboard Hook
 	if (ghKbdHook)
@@ -451,9 +462,12 @@ void CMainFrame::OnDropFiles(HDROP hDropInfo)
 					if(!inputFile.IsValid())
 						continue;
 					auto sndFile = std::make_unique<CSoundFile>();
-					MPT_LOG(LogDebug, "info", U_("Loading ") + scanName.ToUnicode());
+					MPT_LOG_GLOBAL(LogDebug, "info", U_("Loading ") + scanName.ToUnicode());
 					if(!sndFile->Create(GetFileReader(inputFile), CSoundFile::loadCompleteModule, nullptr))
+					{
+						MPT_LOG_GLOBAL(LogDebug, "info", U_("FAILED: ") + scanName.ToUnicode());
 						failed++;
+					}
 					total++;
 				}
 				Reporting::Information(MPT_UFORMAT("Scanned {} files, {} failed")(total, failed));
@@ -653,21 +667,21 @@ void CMainFrame::SoundDeviceMessage(LogLevel level, const mpt::ustring &str)
 }
 
 
-void CMainFrame::SoundSourcePreStartCallback()
+void CMainFrame::SoundCallbackPreStart()
 {
 	MPT_TRACE();
 	m_SoundDeviceClock.SetResolution(1);
 }
 
 
-void CMainFrame::SoundSourcePostStopCallback()
+void CMainFrame::SoundCallbackPostStop()
 {
 	MPT_TRACE();
 	m_SoundDeviceClock.SetResolution(0);
 }
 
 
-uint64 CMainFrame::SoundSourceGetReferenceClockNowNanoseconds() const
+uint64 CMainFrame::SoundCallbackGetReferenceClockNowNanoseconds() const
 {
 	MPT_TRACE();
 	MPT_ASSERT(!InAudioThread());
@@ -675,7 +689,7 @@ uint64 CMainFrame::SoundSourceGetReferenceClockNowNanoseconds() const
 }
 
 
-uint64 CMainFrame::SoundSourceLockedGetReferenceClockNowNanoseconds() const
+uint64 CMainFrame::SoundCallbackLockedGetReferenceClockNowNanoseconds() const
 {
 	MPT_TRACE();
 	MPT_ASSERT(InAudioThread());
@@ -683,14 +697,14 @@ uint64 CMainFrame::SoundSourceLockedGetReferenceClockNowNanoseconds() const
 }
 
 
-bool CMainFrame::SoundSourceIsLockedByCurrentThread() const
+bool CMainFrame::SoundCallbackIsLockedByCurrentThread() const
 {
 	MPT_TRACE();
 	return theApp.GetGlobalMutexRef().IsLockedByCurrentThread();
 }
 
 
-void CMainFrame::SoundSourceLock()
+void CMainFrame::SoundCallbackLock()
 {
 	MPT_TRACE_SCOPE();
 	m_SoundDeviceFillBufferCriticalSection.Enter();
@@ -700,7 +714,7 @@ void CMainFrame::SoundSourceLock()
 }
 
 
-void CMainFrame::SoundSourceUnlock()
+void CMainFrame::SoundCallbackUnlock()
 {
 	MPT_TRACE_SCOPE();
 	MPT_ASSERT_ALWAYS(m_pSndFile != nullptr);
@@ -709,65 +723,51 @@ void CMainFrame::SoundSourceUnlock()
 }
 
 
-template <typename Tsample>
-class StereoVuMeterSourceWrapper
+class BufferInputWrapper
 	: public IAudioSource
 {
 private:
-	SoundDevice::BufferIO<Tsample> &bufferio;
-	VUMeter &vumeter;
+	SoundDevice::CallbackBuffer<DithersOpenMPT> &callbackBuffer;
 public:
-	inline StereoVuMeterSourceWrapper(SoundDevice::BufferIO<Tsample> &bufferIO, VUMeter &vumeter)
-		: bufferio(bufferIO)
-		, vumeter(vumeter)
+	inline BufferInputWrapper(SoundDevice::CallbackBuffer<DithersOpenMPT> &callbackBuffer_)
+		: callbackBuffer(callbackBuffer_)
 	{
 		return;
 	}
-	inline void FillCallback(MixSampleInt * const *MixInputBuffers, std::size_t channels, std::size_t countChunk) override
+	inline void Process(mpt::audio_span_planar<MixSampleInt> buffer) override
 	{
-		audio_buffer_planar<MixSampleInt> dst(MixInputBuffers, channels, countChunk);
-		bufferio.ReadFixedPoint<MixSampleIntTraits::mix_fractional_bits>(dst, countChunk);
-		vumeter.Process(MixInputBuffers, channels, countChunk);
+		callbackBuffer.template ReadFixedPoint<MixSampleIntTraits::mix_fractional_bits>(buffer);
 	}
-	inline void FillCallback(MixSampleFloat * const *MixInputBuffers, std::size_t channels, std::size_t countChunk) override
+	inline void Process(mpt::audio_span_planar<MixSampleFloat> buffer) override
 	{
-		audio_buffer_planar<MixSampleFloat> dst(MixInputBuffers, channels, countChunk);
-		bufferio.Read(dst, countChunk);
-		vumeter.Process(MixInputBuffers, channels, countChunk);
+		callbackBuffer.Read(buffer);
 	}
 };
 
 
-template <typename Tsample>
-class StereoVuMeterTargetWrapper
-	: public IAudioReadTarget
+class BufferOutputWrapper
+	: public IAudioTarget
 {
 private:
-	SoundDevice::BufferIO<Tsample> &bufferio;
-	VUMeter &vumeter;
+	SoundDevice::CallbackBuffer<DithersOpenMPT> &callbackBuffer;
 public:
-	inline StereoVuMeterTargetWrapper(SoundDevice::BufferIO<Tsample> &bufferIO, VUMeter &vumeter)
-		: bufferio(bufferIO)
-		, vumeter(vumeter)
+	inline BufferOutputWrapper(SoundDevice::CallbackBuffer<DithersOpenMPT> &callbackBuffer_)
+		: callbackBuffer(callbackBuffer_)
 	{
 		return;
 	}
-	inline void DataCallback(MixSampleInt *MixSoundBuffer, std::size_t channels, std::size_t countChunk) override
+	inline void Process(mpt::audio_span_interleaved<MixSampleInt> buffer) override
 	{
-		vumeter.Process(MixSoundBuffer, channels, countChunk);
-		audio_buffer_interleaved<const MixSampleInt> src(MixSoundBuffer, channels, countChunk);
-		bufferio.WriteFixedPoint<MixSampleIntTraits::mix_fractional_bits>(src, countChunk);
+		callbackBuffer.template WriteFixedPoint<MixSampleIntTraits::mix_fractional_bits>(buffer);
 	}
-	inline void DataCallback(MixSampleFloat *MixSoundBuffer, std::size_t channels, std::size_t countChunk) override
+	inline void Process(mpt::audio_span_interleaved<MixSampleFloat> buffer) override
 	{
-		vumeter.Process(MixSoundBuffer, channels, countChunk);
-		audio_buffer_interleaved<const MixSampleFloat> src(MixSoundBuffer, channels, countChunk);
-		bufferio.Write(src, countChunk);
+		callbackBuffer.Write(buffer);
 	}
 };
 
 
-void CMainFrame::SoundSourceLockedReadPrepare(SoundDevice::TimeInfo timeInfo)
+void CMainFrame::SoundCallbackLockedProcessPrepare(SoundDevice::TimeInfo timeInfo)
 {
 	MPT_TRACE_SCOPE();
 	MPT_ASSERT(InAudioThread());
@@ -780,78 +780,25 @@ void CMainFrame::SoundSourceLockedReadPrepare(SoundDevice::TimeInfo timeInfo)
 }
 
 
-template <typename Tsample>
-void CMainFrame::SoundSourceLockedReadImpl(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, Tsample *buffer, const Tsample *inputBuffer)
+void CMainFrame::SoundCallbackLockedCallback(SoundDevice::CallbackBuffer<DithersOpenMPT> &buffer)
 {
 
 	MPT_TRACE_SCOPE();
 	MPT_ASSERT(InAudioThread());
 	OPENMPT_PROFILE_FUNCTION(Profiler::Audio);
-	MPT_ASSERT(numFrames <= std::numeric_limits<CSoundFile::samplecount_t>::max());
-	CSoundFile::samplecount_t framesToRender = static_cast<CSoundFile::samplecount_t>(numFrames);
-	m_Dither.SetMode((DitherMode)bufferFormat.DitherType);
-	SoundDevice::BufferIO<Tsample> bufferIO(buffer, inputBuffer, numFrames, m_Dither, bufferFormat);
-	StereoVuMeterSourceWrapper<Tsample> source(bufferIO, m_VUMeterInput);
-	StereoVuMeterTargetWrapper<Tsample> target(bufferIO, m_VUMeterOutput);
-	CSoundFile::samplecount_t m_nRenderedFrames = m_pSndFile->Read(framesToRender, target, source);
-	MPT_ASSERT(m_nRenderedFrames <= framesToRender);
-	CSoundFile::samplecount_t remainingFrames = framesToRender - m_nRenderedFrames;
-	if(remainingFrames > 0)
-	{
-		// The sound device interface expects the whole buffer to be filled, always.
-		// Clear remaining buffer if not enough samples got rendered.
-		while(remainingFrames > 0)
-		{
-			for(uint32 channel = 0; channel < bufferFormat.Channels; ++channel)
-			{
-				// @TODO: try and remove this to see if lag repeats audio instead of stops (probably just master buffer)
-				buffer[(m_nRenderedFrames * bufferFormat.Channels) + channel] = SC::sample_cast<Tsample>(static_cast<int16>(0));
-			}
-			m_nRenderedFrames += 1;
-			remainingFrames -= 1;
-		}
-	}
-
+	BufferInputWrapper source(buffer);
+	BufferOutputWrapper target(buffer);
+	MPT_ASSERT(buffer.GetNumFrames() <= std::numeric_limits<CSoundFile::samplecount_t>::max());
+	CSoundFile::samplecount_t framesToRender = static_cast<CSoundFile::samplecount_t>(buffer.GetNumFrames());
+	MPT_ASSERT(framesToRender > 0);
+	CSoundFile::samplecount_t renderedFrames = m_pSndFile->Read(framesToRender, target, source, std::ref(m_VUMeterOutput), std::ref(m_VUMeterInput));
+	MPT_ASSERT(renderedFrames <= framesToRender);
+	CSoundFile::samplecount_t remainingFrames = framesToRender - renderedFrames;
+	MPT_ASSERT(remainingFrames >= 0); // remaining buffer is filled with silence automatically
 }
 
 
-void CMainFrame::SoundSourceLockedRead(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, uint8 *buffer, const uint8 *inputBuffer)
-{
-	SoundSourceLockedReadImpl(bufferFormat, numFrames, buffer, inputBuffer);
-}
-
-void CMainFrame::SoundSourceLockedRead(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, int8 *buffer, const int8 *inputBuffer)
-{
-	SoundSourceLockedReadImpl(bufferFormat, numFrames, buffer, inputBuffer);
-}
-
-void CMainFrame::SoundSourceLockedRead(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, int16 *buffer, const int16 *inputBuffer)
-{
-	SoundSourceLockedReadImpl(bufferFormat, numFrames, buffer, inputBuffer);
-}
-
-void CMainFrame::SoundSourceLockedRead(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, int24 *buffer, const int24 *inputBuffer)
-{
-	SoundSourceLockedReadImpl(bufferFormat, numFrames, buffer, inputBuffer);
-}
-
-void CMainFrame::SoundSourceLockedRead(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, int32 *buffer, const int32 *inputBuffer)
-{
-	SoundSourceLockedReadImpl(bufferFormat, numFrames, buffer, inputBuffer);
-}
-
-void CMainFrame::SoundSourceLockedRead(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, float *buffer, const float *inputBuffer)
-{
-	SoundSourceLockedReadImpl(bufferFormat, numFrames, buffer, inputBuffer);
-}
-
-void CMainFrame::SoundSourceLockedRead(SoundDevice::BufferFormat bufferFormat, std::size_t numFrames, double *buffer, const double *inputBuffer)
-{
-	SoundSourceLockedReadImpl(bufferFormat, numFrames, buffer, inputBuffer);
-}
-
-
-void CMainFrame::SoundSourceLockedReadDone(SoundDevice::TimeInfo timeInfo)
+void CMainFrame::SoundCallbackLockedProcessDone(SoundDevice::TimeInfo timeInfo)
 {
 	MPT_TRACE_SCOPE();
 	MPT_ASSERT(InAudioThread());
@@ -901,7 +848,7 @@ bool CMainFrame::audioOpenDevice()
 		return false;
 	}
 	gpSoundDevice->SetMessageReceiver(this);
-	gpSoundDevice->SetSource(this);
+	gpSoundDevice->SetCallback(this);
 	SoundDevice::Settings deviceSettings = TrackerSettings::Instance().GetSoundDeviceSettings(deviceIdentifier);
 	if(!gpSoundDevice->Open(deviceSettings))
 	{
@@ -926,6 +873,7 @@ bool CMainFrame::audioOpenDevice()
 		return false;
 	}
 	deviceSettings.sampleFormat = actualSampleFormat;
+	Dithers().SetMode(deviceSettings.DitherType, deviceSettings.Channels);
 	TrackerSettings::Instance().MixerSamplerate = gpSoundDevice->GetSettings().Samplerate;
 	TrackerSettings::Instance().SetSoundDeviceSettings(deviceIdentifier, deviceSettings);
 	return true;
@@ -960,68 +908,68 @@ void VUMeter::Process(Channel &c, MixSampleInt sample)
 
 void VUMeter::Process(Channel &c, MixSampleFloat sample)
 {
-	Process(c, SC::ConvertToFixedPoint<MixSampleInt, MixSampleFloat, MixSampleIntTraits::filter_fractional_bits>()(sample));
+	Process(c, SC::ConvertToFixedPoint<MixSampleInt, MixSampleFloat, MixSampleIntTraits::mix_fractional_bits>()(sample));
 }
 
 
-void VUMeter::Process(const MixSampleInt *mixbuffer, std::size_t numChannels, std::size_t numFrames)
+void VUMeter::Process(mpt::audio_span_interleaved<const MixSampleInt> buffer)
 {
-	for(std::size_t frame = 0; frame < numFrames; ++frame)
+	for(std::size_t frame = 0; frame < buffer.size_frames(); ++frame)
 	{
-		for(std::size_t channel = 0; channel < std::min(numChannels, maxChannels); ++channel)
+		for(std::size_t channel = 0; channel < std::min(buffer.size_channels(), maxChannels); ++channel)
 		{
-			Process(channels[channel], mixbuffer[frame*numChannels + channel]);
+			Process(channels[channel], buffer(channel, frame));
 		}
 	}
-	for(std::size_t channel = std::min(numChannels, maxChannels); channel < maxChannels; ++channel)
+	for(std::size_t channel = std::min(buffer.size_channels(), maxChannels); channel < maxChannels; ++channel)
 	{
 		channels[channel] = Channel();
 	}
 }
 
 
-void VUMeter::Process(const MixSampleFloat *mixbuffer, std::size_t numChannels, std::size_t numFrames)
+void VUMeter::Process(mpt::audio_span_interleaved<const MixSampleFloat> buffer)
 {
-	for(std::size_t frame = 0; frame < numFrames; ++frame)
+	for(std::size_t frame = 0; frame < buffer.size_frames(); ++frame)
 	{
-		for(std::size_t channel = 0; channel < std::min(numChannels, maxChannels); ++channel)
+		for(std::size_t channel = 0; channel < std::min(buffer.size_channels(), maxChannels); ++channel)
 		{
-			Process(channels[channel], mixbuffer[frame*numChannels + channel]);
+			Process(channels[channel], buffer(channel, frame));
 		}
 	}
-	for(std::size_t channel = std::min(numChannels, maxChannels); channel < maxChannels; ++channel)
+	for(std::size_t channel = std::min(buffer.size_channels(), maxChannels); channel < maxChannels; ++channel)
 	{
 		channels[channel] = Channel();
 	}
 }
 
 
-void VUMeter::Process(const MixSampleInt *const *mixbuffers, std::size_t numChannels, std::size_t numFrames)
+void VUMeter::Process(mpt::audio_span_planar<const MixSampleInt> buffer)
 {
-	for(std::size_t channel = 0; channel < std::min(numChannels, maxChannels); ++channel)
+	for(std::size_t frame = 0; frame < buffer.size_frames(); ++frame)
 	{
-		for(std::size_t frame = 0; frame < numFrames; ++frame)
+		for(std::size_t channel = 0; channel < std::min(buffer.size_channels(), maxChannels); ++channel)
 		{
-			Process(channels[channel], mixbuffers[channel][frame]);
+			Process(channels[channel], buffer(channel, frame));
 		}
 	}
-	for(std::size_t channel = std::min(numChannels, maxChannels); channel < maxChannels; ++channel)
+	for(std::size_t channel = std::min(buffer.size_channels(), maxChannels); channel < maxChannels; ++channel)
 	{
 		channels[channel] = Channel();
 	}
 }
 
 
-void VUMeter::Process(const MixSampleFloat *const *mixbuffers, std::size_t numChannels, std::size_t numFrames)
+void VUMeter::Process(mpt::audio_span_planar<const MixSampleFloat> buffer)
 {
-	for(std::size_t channel = 0; channel < std::min(numChannels, maxChannels); ++channel)
+	for(std::size_t frame = 0; frame < buffer.size_frames(); ++frame)
 	{
-		for(std::size_t frame = 0; frame < numFrames; ++frame)
+		for(std::size_t channel = 0; channel < std::min(buffer.size_channels(), maxChannels); ++channel)
 		{
-			Process(channels[channel], mixbuffers[channel][frame]);
+			Process(channels[channel], buffer(channel, frame));
 		}
 	}
-	for(std::size_t channel = std::min(numChannels, maxChannels); channel < maxChannels; ++channel)
+	for(std::size_t channel = std::min(buffer.size_channels(), maxChannels); channel < maxChannels; ++channel)
 	{
 		channels[channel] = Channel();
 	}
@@ -1206,7 +1154,7 @@ void CMainFrame::UpdateDspEffects(CSoundFile &sndFile, bool reset)
 	sndFile.m_MegaBass.m_Settings = TrackerSettings::Instance().m_MegaBassSettings;
 #endif
 #ifndef NO_EQ
-	sndFile.SetEQGains(TrackerSettings::Instance().m_EqSettings.Gains, MAX_EQ_BANDS, TrackerSettings::Instance().m_EqSettings.Freqs, reset);
+	sndFile.SetEQGains(TrackerSettings::Instance().m_EqSettings.Gains, TrackerSettings::Instance().m_EqSettings.Freqs, reset);
 #endif
 #ifndef NO_DSP
 	sndFile.m_BitCrush.m_Settings = TrackerSettings::Instance().m_BitCrushSettings;
@@ -1348,6 +1296,7 @@ bool CMainFrame::StartPlayback()
 	MPT_TRACE_SCOPE();
 	if(!m_pSndFile) return false; // nothing to play
 	if(!IsAudioDeviceOpen()) return false;
+	Dithers().Reset();
 	if(!gpSoundDevice->Start()) return false;
 	if(!m_NotifyTimer)
 	{
@@ -2089,9 +2038,9 @@ void CMainFrame::OnAddDlsBank()
 {
 	FileDialog dlg = OpenFileDialog()
 		.AllowMultiSelect()
-		.ExtensionFilter("All Sound Banks|*.dls;*.sbk;*.sf2;*.mss|"
+		.ExtensionFilter("All Sound Banks|*.dls;*.sbk;*.sf2;*.sf3;*.sf4;*.mss|"
 			"Downloadable Sounds Banks (*.dls)|*.dls;*.mss|"
-			"SoundFont 2.0 Banks (*.sf2)|*.sbk;*.sf2|"
+			"SoundFont 2.0 Banks (*.sf2)|*.sbk;*.sf2;*.sf3;*.sf4|"
 			"All Files (*.*)|*.*||");
 	if(!dlg.Show()) return;
 
@@ -2113,9 +2062,9 @@ void CMainFrame::OnAddDlsBank()
 void CMainFrame::OnImportMidiLib()
 {
 	FileDialog dlg = OpenFileDialog()
-		.ExtensionFilter("Text and INI files (*.txt,*.ini)|*.txt;*.ini;*.dls;*.sf2;*.sbk|"
+		.ExtensionFilter("Text and INI files (*.txt,*.ini)|*.txt;*.ini;*.dls;*.sf2;*.sf3;*.sf4;*.sbk|"
 			"Downloadable Sound Banks (*.dls)|*.dls;*.mss|"
-			"SoundFont 2.0 banks (*.sf2)|*.sbk;*.sf2|"
+			"SoundFont 2.0 banks (*.sf2)|*.sbk;*.sf2;*.sf3;*.sf4|"
 			"Gravis UltraSound (ultrasnd.ini)|ultrasnd.ini|"
 			"All Files (*.*)|*.*||");
 	if(!dlg.Show()) return;
@@ -2202,7 +2151,7 @@ void CMainFrame::OnTimerGUI()
 			cwnd->GetClientRect(&rect);
 			rect.left += width;
 			rect.top += i * height;
-			auto s = mpt::ToCString(mpt::Charset::ASCII, mpt::fmt::right(6, mpt::fmt::fix(cats[i] * 100.0, 3)) + "% " + catnames[i]);
+			auto s = mpt::ToCString(mpt::Charset::ASCII, mpt::afmt::right(6, mpt::afmt::fix(cats[i] * 100.0, 3)) + "% " + catnames[i]);
 			dc.DrawText(s, s.GetLength(), &rect, DT_LEFT);
 		}
 
@@ -2537,6 +2486,7 @@ LRESULT CMainFrame::OnCustomKeyMsg(WPARAM wParam, LPARAM lParam)
 		case kcFileSaveCopy:
 		case kcFileSaveAsWave:
 		case kcFileSaveMidi:
+		case kcFileSaveOPL:
 		case kcFileExportCompat:
 		case kcFileClose:
 		case kcFileSave:
@@ -2559,9 +2509,16 @@ LRESULT CMainFrame::OnCustomKeyMsg(WPARAM wParam, LPARAM lParam)
 		case kcPlaySongFromPattern:
 		case kcStopSong:
 		case kcToggleLoopSong:
+		case kcPanic:
 		case kcEstimateSongLength:
 		case kcApproxRealBPM:
-		case kcPanic:
+		case kcTempoIncrease:
+		case kcTempoDecrease:
+		case kcTempoIncreaseFine:
+		case kcTempoDecreaseFine:
+		case kcSpeedIncrease:
+		case kcSpeedDecrease:
+		case kcViewToggle:
 			{
 				CModDoc *modDoc = GetActiveDoc();
 				if (modDoc)
@@ -2612,7 +2569,6 @@ LRESULT CMainFrame::OnCustomKeyMsg(WPARAM wParam, LPARAM lParam)
 void CMainFrame::OnInitMenu(CMenu* pMenu)
 {
 	m_InputHandler->SetModifierMask(ModNone);
-	// This used to not be called to prevent Alt key from activating the menu... but that never worked as imagined, I guess.
 	CMDIFrameWnd::OnInitMenu(pMenu);
 
 }
@@ -2637,7 +2593,7 @@ BOOL CMainFrame::StopRenderer(CSoundFile* pSndFile)
 }
 
 
-// We have swicthed focus to a new module - might need to update effect keys to reflect module type
+// We have switched focus to a new module - might need to update effect keys to reflect module type
 bool CMainFrame::UpdateEffectKeys(const CModDoc *modDoc)
 {
 	if(modDoc != nullptr)
@@ -2679,6 +2635,17 @@ void CMainFrame::OnInternetUpdate()
 }
 
 
+void CMainFrame::OnUpdateAvailable()
+{
+#if defined(MPT_ENABLE_UPDATE)
+	if(m_updateCheckResult)
+		CUpdateCheck::ShowSuccessGUI(false, *m_updateCheckResult);
+	else
+		CUpdateCheck::DoManualUpdateCheck();
+#endif  // MPT_ENABLE_UPDATE
+}
+
+
 void CMainFrame::OnShowSettingsFolder()
 {
 	theApp.OpenDirectory(theApp.GetConfigPath());
@@ -2706,9 +2673,28 @@ static std::unique_ptr<CUpdateCheckProgressDialog> g_UpdateCheckProgressDialog =
 #if defined(MPT_ENABLE_UPDATE)
 
 
+bool CMainFrame::ShowUpdateIndicator(const UpdateCheckResult &result, const CString &releaseVersion, const CString &infoURL, bool showHighlight)
+{
+	m_updateCheckResult = std::make_unique<UpdateCheckResult>(result);
+	if(m_wndToolBar.IsVisible())
+	{
+		return m_wndToolBar.ShowUpdateInfo(releaseVersion, infoURL, showHighlight);
+	} else
+	{
+		GetMenu()->RemoveMenu(ID_UPDATE_AVAILABLE, MF_BYCOMMAND);
+		GetMenu()->AppendMenu(MF_STRING, ID_UPDATE_AVAILABLE, _T("[Update Available]"));
+		DrawMenuBar();
+		return true;
+	}
+}
+
+
 LRESULT CMainFrame::OnUpdateCheckStart(WPARAM wparam, LPARAM lparam)
 {
-	bool isAutoUpdate = CUpdateCheck::IsAutoUpdateFromMessage(wparam, lparam);
+	GetMenu()->RemoveMenu(ID_UPDATE_AVAILABLE, MF_BYCOMMAND);
+	m_wndToolBar.RemoveUpdateInfo();
+
+	const bool isAutoUpdate = CUpdateCheck::IsAutoUpdateFromMessage(wparam, lparam);
 	CString updateText = _T("Checking for updates...");
 	if(isAutoUpdate)
 	{
@@ -2739,7 +2725,7 @@ LRESULT CMainFrame::OnUpdateCheckStart(WPARAM wparam, LPARAM lparam)
 
 LRESULT CMainFrame::OnUpdateCheckProgress(WPARAM wparam, LPARAM lparam)
 {
-	bool isAutoUpdate = wparam ? true : false;
+	bool isAutoUpdate = wparam != 0;
 	CString updateText = MPT_CFORMAT("Checking for updates... {}%")(lparam);
 	if(isAutoUpdate)
 	{
@@ -2764,6 +2750,7 @@ LRESULT CMainFrame::OnUpdateCheckProgress(WPARAM wparam, LPARAM lparam)
 
 LRESULT CMainFrame::OnUpdateCheckCanceled(WPARAM wparam, LPARAM lparam)
 {
+	m_updateCheckResult.reset();
 	bool isAutoUpdate = CUpdateCheck::IsAutoUpdateFromMessage(wparam, lparam);
 	CString updateText = _T("Checking for updates... Canceled.");
 	if(isAutoUpdate)
@@ -2784,12 +2771,6 @@ LRESULT CMainFrame::OnUpdateCheckCanceled(WPARAM wparam, LPARAM lparam)
 	if(isAutoUpdate)
 	{
 		SetHelpText(_T(""));
-	} else if(m_UpdateOptionsDialog)
-	{
-		// nothing
-	} else
-	{
-		// nothing
 	}
 	return TRUE;
 }
@@ -2797,8 +2778,10 @@ LRESULT CMainFrame::OnUpdateCheckCanceled(WPARAM wparam, LPARAM lparam)
 
 LRESULT CMainFrame::OnUpdateCheckFailure(WPARAM wparam, LPARAM lparam)
 {
-	bool isAutoUpdate = CUpdateCheck::IsAutoUpdateFromMessage(wparam, lparam);
-	CString updateText = MPT_CFORMAT("Checking for updates failed: {}")(CUpdateCheck::GetFailureMessage(wparam, lparam));
+	m_updateCheckResult.reset();
+	const bool isAutoUpdate = CUpdateCheck::IsAutoUpdateFromMessage(wparam, lparam);
+	const CUpdateCheck::Error &error = CUpdateCheck::MessageAsError(wparam, lparam);
+	CString updateText = MPT_CFORMAT("Checking for updates failed: {}")(mpt::get_exception_text<mpt::ustring>(error));
 	if(isAutoUpdate)
 	{
 		SetHelpText(updateText);
@@ -2814,16 +2797,10 @@ LRESULT CMainFrame::OnUpdateCheckFailure(WPARAM wparam, LPARAM lparam)
 			g_UpdateCheckProgressDialog = nullptr;
 		}
 	}
-	CUpdateCheck::ShowFailureGUI(wparam, lparam);
+	CUpdateCheck::ShowFailureGUI(isAutoUpdate, error);
 	if(isAutoUpdate)
 	{
 		SetHelpText(_T(""));
-	} else if(m_UpdateOptionsDialog)
-	{
-		// nothing
-	} else
-	{
-		// nothing
 	}
 	return TRUE;
 }
@@ -2831,44 +2808,47 @@ LRESULT CMainFrame::OnUpdateCheckFailure(WPARAM wparam, LPARAM lparam)
 
 LRESULT CMainFrame::OnUpdateCheckSuccess(WPARAM wparam, LPARAM lparam)
 {
-	bool isAutoUpdate = CUpdateCheck::IsAutoUpdateFromMessage(wparam, lparam);
-	CString updateText = _T("Checking for updates... Done.");
-	// TODO:
-	// UpdateToolbarUpdateIndicator(CUpdateCheck::ResultFromMessage(wparam, lparam));
-	if(isAutoUpdate)
+	m_updateCheckResult.reset();
+	const bool isAutoUpdate = CUpdateCheck::IsAutoUpdateFromMessage(wparam, lparam);
+	const UpdateCheckResult &result = CUpdateCheck::MessageAsResult(wparam, lparam);
+	CUpdateCheck::AcknowledgeSuccess(result);
+	if(result.CheckTime != time_t{})
+		TrackerSettings::Instance().UpdateLastUpdateCheck = mpt::Date::Unix(result.CheckTime);
+	if(!isAutoUpdate)
 	{
-		SetHelpText(updateText);
-	} else if(m_UpdateOptionsDialog)
-	{
-		m_UpdateOptionsDialog->SetDlgItemText(IDC_LASTUPDATE, updateText);
-	} else
-	{
-		SetHelpText(updateText);
-		if(g_UpdateCheckProgressDialog)
+		if(m_UpdateOptionsDialog)
 		{
-			g_UpdateCheckProgressDialog->DestroyWindow();
-			g_UpdateCheckProgressDialog = nullptr;
+			m_UpdateOptionsDialog->SetDlgItemText(IDC_LASTUPDATE, _T("Checking for updates... Done."));
+		} else
+		{
+			if(g_UpdateCheckProgressDialog)
+			{
+				g_UpdateCheckProgressDialog->DestroyWindow();
+				g_UpdateCheckProgressDialog = nullptr;
+			}
+			SetHelpText(_T(""));
 		}
 	}
-	CUpdateCheck::ShowSuccessGUI(wparam, lparam);
+	CUpdateCheck::ShowSuccessGUI(isAutoUpdate, result);
 	if(isAutoUpdate)
 	{
 		SetHelpText(_T(""));
-	} else if(m_UpdateOptionsDialog)
-	{
-		// nothing
-	} else
-	{
-		// nothing
 	}
 	return TRUE;
 }
 
 
-void CMainFrame::OnToolbarUpdateIndicatorClick()
+LPARAM CMainFrame::OnToolbarUpdateIndicatorClick(WPARAM action, LPARAM)
 {
-	// TODO
-	CUpdateCheck::DoManualUpdateCheck();
+	const auto popAction = static_cast<UpdateToolTip::PopAction>(action);
+	if(popAction != UpdateToolTip::PopAction::ClickBubble)
+		return 0;
+
+	if(m_updateCheckResult)
+		CUpdateCheck::ShowSuccessGUI(false, *m_updateCheckResult);
+	else
+		CUpdateCheck::DoManualUpdateCheck();
+	return 0;
 }
 
 
@@ -2902,11 +2882,27 @@ void CMainFrame::OnHelp()
 	} else if(view != nullptr)
 	{
 		const char *className = view->GetRuntimeClass()->m_lpszClassName;
-		if(!strcmp("CViewGlobals", className))			page = "::/General.html";
-		else if(!strcmp("CViewPattern", className))		page = "::/Patterns.html";
-		else if(!strcmp("CViewSample", className))		page = "::/Samples.html";
-		else if(!strcmp("CViewInstrument", className))	page = "::/Instruments.html";
-		else if(!strcmp("CModControlView", className))	page = "::/Comments.html";
+		if(!strcmp("CViewGlobals", className))
+			page = "::/General.html";
+		else if(!strcmp("CViewPattern", className))
+			page = "::/Patterns.html";
+		else if(!strcmp("CViewSample", className))
+			page = "::/Samples.html";
+		else if(!strcmp("CViewInstrument", className))
+			page = "::/Instruments.html";
+		else if(!strcmp("CViewComments", className))
+			page = "::/Comments.html";
+		else if(!strcmp("CModControlView", className))
+		{
+			switch(static_cast<CModControlView*>(view)->GetActivePage())
+			{
+				case CModControlView::VIEW_GLOBALS: page = "::/General.html"; break;
+				case CModControlView::VIEW_PATTERNS: page = "::/Patterns.html"; break;
+				case CModControlView::VIEW_SAMPLES: page = "::/Samples.html"; break;
+				case CModControlView::VIEW_INSTRUMENTS: page = "::/Instruments.html"; break;
+				case CModControlView::VIEW_COMMENTS: page = "::/Comments.html"; break;
+			}
+		}
 	}
 
 	const mpt::PathString helpFile = theApp.GetInstallPath() + P_("OpenMPT Manual.chm") + mpt::PathString::FromUTF8(page) + P_(">OpenMPT");
@@ -3086,7 +3082,7 @@ void CMainFrame::UpdateMRUList()
 					path = path.substr(0, start + 1) + _T("...") + path.substr(end);
 				}
 			}
-			path = mpt::String::Replace(path, _T("&"), _T("&&"));
+			path = mpt::String::Replace(path, mpt::winstring(_T("&")), mpt::winstring(_T("&&")));
 			s += path;
 			pMenu->InsertMenu(firstMenu + i, MF_STRING | MF_BYPOSITION, ID_MRU_LIST_FIRST + i, mpt::ToCString(s));
 		}
@@ -3245,14 +3241,14 @@ void AddPluginNamesToCombobox(CComboBox &CBox, const SNDMIXPLUGIN *plugarray, co
 			str += _T(" (") + mpt::ToWin(libName) + _T(")");
 		else if(plugName.empty() && (!libraryName || libName.empty()))
 			str += _T("--");
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 		auto *vstPlug = dynamic_cast<const CVstPlugin *>(plugin.pMixPlugin);
 		if(vstPlug != nullptr && vstPlug->isBridged)
 		{
 			VSTPluginLib &lib = vstPlug->GetPluginFactory();
 			str += MPT_TFORMAT(" ({} Bridged)")(lib.GetDllArchNameUser());
 		}
-#endif // NO_VST
+#endif // MPT_WITH_VST
 
 		insertAt = CBox.InsertString(insertAt, str.c_str());
 		CBox.SetItemData(insertAt, plug + 1);

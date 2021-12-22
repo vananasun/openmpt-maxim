@@ -44,7 +44,7 @@ BOOL WelcomeDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
 
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 	HKEY hkEnum = NULL;
 	TCHAR str[MAX_PATH];
 	DWORD datasize = sizeof(str);
@@ -52,12 +52,10 @@ BOOL WelcomeDlg::OnInitDialog()
 	if(RegOpenKey(HKEY_LOCAL_MACHINE, _T("Software\\VST"), &hkEnum) == ERROR_SUCCESS
 		&& RegQueryValueEx(hkEnum, _T("VSTPluginsPath"), 0, &datatype, (LPBYTE)str, &datasize) == ERROR_SUCCESS)
 	{
-		mpt::String::SetNullTerminator(str);
-		m_vstPath = mpt::PathString::FromNative(str);
+		m_vstPath = mpt::PathString::FromNative(ParseMaybeNullTerminatedStringFromBufferWithSizeInBytes<mpt::winstring>(str, datasize));
 	} else if(SHGetSpecialFolderPath(0, str, CSIDL_PROGRAM_FILES, FALSE))
 	{
-		mpt::String::SetNullTerminator(str);
-		m_vstPath = mpt::PathString::FromNative(str) + P_("\\Steinberg\\VstPlugins\\");
+		m_vstPath = mpt::PathString::FromNative(ParseMaybeNullTerminatedStringFromBufferWithSizeInBytes<mpt::winstring>(str, datasize)) + P_("\\Steinberg\\VstPlugins\\");
 		if(!m_vstPath.IsDirectory())
 		{
 			m_vstPath = mpt::PathString();
@@ -71,7 +69,7 @@ BOOL WelcomeDlg::OnInitDialog()
 			TrackerSettings::Instance().PathPlugins.SetDefaultDir(m_vstPath);
 		}
 	} else
-#endif
+#endif // MPT_WITH_VST
 	{
 		SetDlgItemText(IDC_EDIT1, _T("No plugin path found!"));
 		GetDlgItem(IDC_BUTTON2)->EnableWindow(FALSE);
@@ -145,9 +143,9 @@ void WelcomeDlg::OnOptions()
 
 void WelcomeDlg::OnScanPlugins()
 {
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 	CSelectPluginDlg::ScanPlugins(m_vstPath, this);
-#endif
+#endif // MPT_WITH_VST
 }
 
 

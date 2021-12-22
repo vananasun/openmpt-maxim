@@ -10,14 +10,14 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 OPENMPT_NAMESPACE_BEGIN
 
 // Version definitions. The only thing that needs to be changed when changing version number.
 #define VER_MAJORMAJOR  1
-#define VER_MAJOR      30
+#define VER_MAJOR      31
 #define VER_MINOR      00
-#define VER_MINORMINOR 33
+#define VER_MINORMINOR 01
 
 OPENMPT_NAMESPACE_END

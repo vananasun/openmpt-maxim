@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 #include "Sndfile.h"
 #include "../common/misc_util.h"
@@ -82,6 +82,7 @@ public:
 
 struct PlayNoteParam
 {
+	std::bitset<128> *m_notesPlaying = nullptr;
 	SmpLength m_loopStart = 0, m_loopEnd = 0, m_sampleOffset = 0;
 	int32 m_volume = -1;
 	SAMPLEINDEX m_sample = 0;
@@ -99,6 +100,8 @@ struct PlayNoteParam
 	PlayNoteParam& Sample(SAMPLEINDEX sample) { m_sample = sample; return *this; }
 	PlayNoteParam& Instrument(INSTRUMENTINDEX instr) { m_instr = instr; return *this; }
 	PlayNoteParam& Channel(CHANNELINDEX channel) { m_currentChannel = channel; return *this; }
+
+	PlayNoteParam& CheckNNA(std::bitset<128> &notesPlaying) { m_notesPlaying = &notesPlaying; return *this; }
 };
 
 
@@ -293,6 +296,9 @@ public:
 	BOOL ExpandPattern(PATTERNINDEX nPattern);
 	BOOL ShrinkPattern(PATTERNINDEX nPattern);
 
+	bool SetDefaultChannelColors();
+	bool SupportsChannelColors() const { return GetModType() & (MOD_TYPE_XM | MOD_TYPE_IT | MOD_TYPE_MPT); }
+
 	bool CopyEnvelope(INSTRUMENTINDEX nIns, EnvelopeType nEnv);
 	bool SaveEnvelope(INSTRUMENTINDEX nIns, EnvelopeType nEnv, const mpt::PathString &fileName);
 	bool PasteEnvelope(INSTRUMENTINDEX nIns, EnvelopeType nEnv);
@@ -344,7 +350,6 @@ public:
 protected:
 
 	void InitializeMod();
-	void SetDefaultChannelColors();
 
 public:
 	CChildFrame *GetChildFrame(); //rewbs.customKeys
@@ -416,6 +421,7 @@ public:
 	//{{AFX_MSG(CModDoc)
 	afx_msg void OnFileWaveConvert();
 	afx_msg void OnFileMidiConvert();
+	afx_msg void OnFileOPLExport();
 	afx_msg void OnFileCompatibilitySave();
 	afx_msg void OnPlayerPlay();
 	afx_msg void OnPlayerStop();

@@ -55,13 +55,6 @@ static constexpr uint8 PreAmpAGCTable[16] =
 #endif
 
 
-// Compensate frequency slide LUTs depending on whether we are handling periods or frequency - "up" and "down" in function name are seen from frequency perspective.
-static uint32 GetLinearSlideDownTable    (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(LinearSlideDownTable));     return sndFile->m_playBehaviour[kHertzInLinearMode] ? LinearSlideDownTable[i]     : LinearSlideUpTable[i]; }
-static uint32 GetLinearSlideUpTable      (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(LinearSlideDownTable));     return sndFile->m_playBehaviour[kHertzInLinearMode] ? LinearSlideUpTable[i]       : LinearSlideDownTable[i]; }
-static uint32 GetFineLinearSlideDownTable(const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(FineLinearSlideDownTable)); return sndFile->m_playBehaviour[kHertzInLinearMode] ? FineLinearSlideDownTable[i] : FineLinearSlideUpTable[i]; }
-static uint32 GetFineLinearSlideUpTable  (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(FineLinearSlideDownTable)); return sndFile->m_playBehaviour[kHertzInLinearMode] ? FineLinearSlideUpTable[i]   : FineLinearSlideDownTable[i]; }
-
-
 void CSoundFile::SetMixerSettings(const MixerSettings &mixersettings)
 {
 	SetPreAmp(mixersettings.m_nPreAmp); // adjust agc
@@ -97,7 +90,7 @@ void CSoundFile::InitPlayer(bool bReset)
 	}
 	m_Resampler.UpdateTables();
 #ifndef NO_REVERB
-	m_Reverb.Initialize(bReset, m_MixerSettings.gdwMixingFreq);
+	m_Reverb.Initialize(bReset, m_RvbROfsVol, m_RvbLOfsVol, m_MixerSettings.gdwMixingFreq);
 #endif
 #ifndef NO_DSP
 	m_Surround.Initialize(bReset, m_MixerSettings.gdwMixingFreq);
@@ -133,10 +126,10 @@ bool CSoundFile::FadeSong(uint32 msec)
 	{
 		ModChannel &pramp = m_PlayState.Chn[m_PlayState.ChnMix[noff]];
 		pramp.newRightVol = pramp.newLeftVol = 0;
-		pramp.leftRamp = (-pramp.leftVol << VOLUMERAMPPRECISION) / nRampLength;
-		pramp.rightRamp = (-pramp.rightVol << VOLUMERAMPPRECISION) / nRampLength;
-		pramp.rampLeftVol = pramp.leftVol << VOLUMERAMPPRECISION;
-		pramp.rampRightVol = pramp.rightVol << VOLUMERAMPPRECISION;
+		pramp.leftRamp = -pramp.leftVol * (1 << VOLUMERAMPPRECISION) / nRampLength;
+		pramp.rightRamp = -pramp.rightVol * (1 << VOLUMERAMPPRECISION) / nRampLength;
+		pramp.rampLeftVol = pramp.leftVol * (1 << VOLUMERAMPPRECISION);
+		pramp.rampRightVol = pramp.rightVol * (1 << VOLUMERAMPPRECISION);
 		pramp.nRampLength = nRampLength;
 		pramp.dwFlags.set(CHN_VOLUMERAMP);
 	}
@@ -206,26 +199,33 @@ void CSoundFile::ProcessInputChannels(IAudioSource &source, std::size_t countChu
 	{
 		buffers[channel] = MixInputBuffer[channel];
 	}
-	source.FillCallback(buffers, m_MixerSettings.NumInputChannels, countChunk);
+	source.Process(mpt::audio_span_planar(buffers, m_MixerSettings.NumInputChannels, countChunk));
 }
 
 
+// Read one tick but skip all expensive rendering options
+CSoundFile::samplecount_t CSoundFile::ReadOneTick()
+{
+	const auto origMaxMixChannels = m_MixerSettings.m_nMaxMixChannels;
+	m_MixerSettings.m_nMaxMixChannels = 0;
+	while(m_PlayState.m_nBufferCount)
+	{
+		auto framesToRender = std::min(m_PlayState.m_nBufferCount, samplecount_t(MIXBUFFERSIZE));
+		CreateStereoMix(framesToRender);
+		m_PlayState.m_nBufferCount -= framesToRender;
+		m_PlayState.m_lTotalSampleCount += framesToRender;
+	}
+	m_MixerSettings.m_nMaxMixChannels = origMaxMixChannels;
+	if(ReadNote())
+		return m_PlayState.m_nBufferCount;
+	else
+		return 0;
+}
 
-CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget &target, IAudioSource &source)
+
+CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioTarget &target, IAudioSource &source, std::optional<std::reference_wrapper<IMonitorOutput>> outputMonitor, std::optional<std::reference_wrapper<IMonitorInput>> inputMonitor)
 {
 	MPT_ASSERT_ALWAYS(m_MixerSettings.IsValid());
-
-	bool mixPlugins = false;
-#ifndef NO_PLUGINS
-	for(const auto &plug : m_MixPlugins)
-	{
-		if(plug.pMixPlugin)
-		{
-			mixPlugins = true;
-			break;
-		}
-	}
-#endif // NO_PLUGINS
 
 	samplecount_t countRendered = 0;
 	samplecount_t countToRender = count;
@@ -352,6 +352,16 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 			ProcessInputChannels(source, countChunk);
 		}
 
+		if(inputMonitor)
+		{
+			mixsample_t *buffers[NUMMIXINPUTBUFFERS];
+			for(std::size_t channel = 0; channel < NUMMIXINPUTBUFFERS; ++channel)
+			{
+				buffers[channel] = MixInputBuffer[channel];
+			}
+			inputMonitor->get().Process(mpt::audio_span_planar<const mixsample_t>(buffers, m_MixerSettings.NumInputChannels, countChunk));
+		}
+
 		CreateStereoMix(countChunk);
 
 		if(m_opl)
@@ -373,14 +383,16 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 #endif
 		}
 
-		#ifndef NO_REVERB
-			m_Reverb.Process(MixSoundBuffer, countChunk);
-		#endif // NO_REVERB
+#ifndef NO_REVERB
+		m_Reverb.Process(MixSoundBuffer, ReverbSendBuffer, m_RvbROfsVol, m_RvbLOfsVol, countChunk);
+#endif  // NO_REVERB
 
-		if(mixPlugins)
+#ifndef NO_PLUGINS
+		if(m_loadedPlugins)
 		{
 			ProcessPlugins(countChunk);
 		}
+#endif  // NO_PLUGINS
 
 		if(m_MixerSettings.gnChannels == 1)
 		{
@@ -406,13 +418,18 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 		{
 			InterleaveFrontRear(MixSoundBuffer, MixRearBuffer, countChunk);
 		}
+
+		if(outputMonitor)
+		{
+			outputMonitor->get().Process(mpt::audio_span_interleaved<const mixsample_t>(MixSoundBuffer, m_MixerSettings.gnChannels, countChunk));
+		}
 		 
 #ifdef MPT_WITH_REWIRE
 		// Dither when not ReWire'd
 		if (!dev)
 		{
 #endif
-			target.DataCallback(MixSoundBuffer, m_MixerSettings.gnChannels, countChunk);
+			target.Process(mpt::audio_span_interleaved<mixsample_t>(MixSoundBuffer, m_MixerSettings.gnChannels, countChunk));
 #ifdef MPT_WITH_REWIRE
 		} else
 		{
@@ -425,7 +442,7 @@ CSoundFile::samplecount_t CSoundFile::Read(samplecount_t count, IAudioReadTarget
 		countRendered += countChunk;
 		countToRender -= countChunk;
 		m_PlayState.m_nBufferCount -= countChunk;
-		m_PlayState.m_lTotalSampleCount += countChunk;		// increase sample count for VSTTimeInfo.
+		m_PlayState.m_lTotalSampleCount += countChunk;
 
 #ifdef MODPLUG_TRACKER
 		if(IsRenderingToDisc())
@@ -704,8 +721,9 @@ bool CSoundFile::ProcessRow()
 						m_visitedRows.Initialize(true);
 					}
 					// When jumping to the next subsong, stop all playing notes from the previous song...
+					const auto muteFlag = CSoundFile::GetChannelMuteFlag();
 					for(CHANNELINDEX i = 0; i < MAX_CHANNELS; i++)
-						m_PlayState.Chn[i].Reset(ModChannel::resetSetPosFull, *this, i);
+						m_PlayState.Chn[i].Reset(ModChannel::resetSetPosFull, *this, i, muteFlag);
 					StopAllVsti();
 					// ...and the global playback information.
 					m_PlayState.m_nMusicSpeed = m_nDefaultSpeed;
@@ -1241,7 +1259,7 @@ void CSoundFile::ProcessPanningEnvelope(ModChannel &chn) const
 }
 
 
-int CSoundFile::ProcessPitchFilterEnvelope(ModChannel &chn, int &period) const
+int CSoundFile::ProcessPitchFilterEnvelope(ModChannel &chn, int32 &period) const
 {
 	if(IsEnvelopeProcessed(chn, ENV_PITCH))
 	{
@@ -1464,16 +1482,13 @@ void CSoundFile::ProcessInstrumentFade(ModChannel &chn, int &vol) const
 }
 
 
-void CSoundFile::ProcessPitchPanSeparation(ModChannel &chn) const
+void CSoundFile::ProcessPitchPanSeparation(int32 &pan, int note, const ModInstrument &instr)
 {
-	const ModInstrument *pIns = chn.pModInstrument;
-
-	if ((pIns->nPPS) && (chn.nNote != NOTE_NONE))
-	{
-		// with PPS = 16 / PPC = C-5, E-6 will pan hard right (and D#6 will not)
-		int pandelta = (int)chn.nRealPan + (int)((int)(chn.nNote - pIns->nPPC - NOTE_MIN) * (int)pIns->nPPS) / 2;
-		chn.nRealPan = Clamp(pandelta, 0, 256);
-	}
+	if(!instr.nPPS || note == NOTE_NONE)
+		return;
+	// with PPS = 16 / PPC = C-5, E-6 will pan hard right (and D#6 will not)
+	int32 delta = (note - instr.nPPC - NOTE_MIN) * instr.nPPS / 2;
+	pan = Clamp(pan + delta, 0, 256);
 }
 
 
@@ -1522,7 +1537,7 @@ void CSoundFile::ProcessPanbrello(ModChannel &chn) const
 }
 
 
-void CSoundFile::ProcessArpeggio(CHANNELINDEX nChn, int &period, Tuning::NOTEINDEXTYPE &arpeggioSteps)
+void CSoundFile::ProcessArpeggio(CHANNELINDEX nChn, int32 &period, Tuning::NOTEINDEXTYPE &arpeggioSteps)
 {
 	ModChannel &chn = m_PlayState.Chn[nChn];
 
@@ -1689,7 +1704,7 @@ void CSoundFile::ProcessArpeggio(CHANNELINDEX nChn, int &period, Tuning::NOTEIND
 					}
 					period = GetPeriodFromNote(note, chn.nFineTune, chn.nC5Speed);
 
-					if(GetType() & (MOD_TYPE_DBM | MOD_TYPE_DIGI | MOD_TYPE_PSM | MOD_TYPE_STM))
+					if(GetType() & (MOD_TYPE_DBM | MOD_TYPE_DIGI | MOD_TYPE_PSM | MOD_TYPE_STM | MOD_TYPE_OKT))
 					{
 						// The arpeggio note offset remains effective after the end of the current row in ScreamTracker 2.
 						// This fixes the flute lead in MORPH.STM by Skaven, pattern 27.
@@ -1707,7 +1722,7 @@ void CSoundFile::ProcessArpeggio(CHANNELINDEX nChn, int &period, Tuning::NOTEIND
 }
 
 
-void CSoundFile::ProcessVibrato(CHANNELINDEX nChn, int &period, Tuning::RATIOTYPE &vibratoFactor)
+void CSoundFile::ProcessVibrato(CHANNELINDEX nChn, int32 &period, Tuning::RATIOTYPE &vibratoFactor)
 {
 	ModChannel &chn = m_PlayState.Chn[nChn];
 
@@ -1790,26 +1805,9 @@ void CSoundFile::ProcessVibrato(CHANNELINDEX nChn, int &period, Tuning::RATIOTYP
 					vdepth += 2;
 			}
 
-			vdelta = (vdelta * (int)chn.nVibratoDepth) / (1 << vdepth);
-#ifndef NO_PLUGINS
-			int16 midiDelta = static_cast<int16>(-vdelta);	// Periods are upside down
-#endif // NO_PLUGINS
+			vdelta = (-vdelta * static_cast<int>(chn.nVibratoDepth)) / (1 << vdepth);
 
-			if (m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
-			{
-				int l = vdelta;
-				if (l < 0)
-				{
-					l = -l;
-					vdelta = Util::muldiv(period, GetLinearSlideUpTable(this, l / 4u), 65536) - period;
-					if (l & 0x03) vdelta += Util::muldiv(period, GetFineLinearSlideUpTable(this, l & 0x03), 65536) - period;
-				} else
-				{
-					vdelta = Util::muldiv(period, GetLinearSlideDownTable(this, l / 4u), 65536) - period;
-					if (l & 0x03) vdelta += Util::muldiv(period, GetFineLinearSlideDownTable(this, l & 0x03), 65536) - period;
-				}
-			}
-			period += vdelta;
+			DoFreqSlide(chn, period, vdelta);
 
 			// Process MIDI vibrato for plugins:
 #ifndef NO_PLUGINS
@@ -1823,7 +1821,7 @@ void CSoundFile::ProcessVibrato(CHANNELINDEX nChn, int &period, Tuning::RATIOTYP
 				{
 					pwd = chn.pModInstrument->midiPWD;
 				}
-				plugin->MidiVibrato(midiDelta, pwd, nChn);
+				plugin->MidiVibrato(vdelta, pwd, nChn);
 			}
 #endif // NO_PLUGINS
 		}
@@ -1846,7 +1844,7 @@ void CSoundFile::ProcessVibrato(CHANNELINDEX nChn, int &period, Tuning::RATIOTYP
 }
 
 
-void CSoundFile::ProcessSampleAutoVibrato(ModChannel &chn, int &period, Tuning::RATIOTYPE &vibratoFactor, int &nPeriodFrac) const
+void CSoundFile::ProcessSampleAutoVibrato(ModChannel &chn, int32 &period, Tuning::RATIOTYPE &vibratoFactor, int &nPeriodFrac) const
 {
 	// Sample Auto-Vibrato
 	if(chn.pModSample != nullptr && chn.pModSample->nVibDepth)
@@ -1854,7 +1852,7 @@ void CSoundFile::ProcessSampleAutoVibrato(ModChannel &chn, int &period, Tuning::
 		const ModSample *pSmp = chn.pModSample;
 		const bool hasTuning = chn.HasCustomTuning();
 
-		// In IT linear slide mode, we use frequencies, otherwise we use periods, which are upside down.
+		// In IT compatible mode, we use always frequencies, otherwise we use periods, which are upside down.
 		// In this context, the "up" tables refer to the tables that increase frequency, and the down tables are the ones that decrease frequency.
 		const bool useFreq = PeriodsAreFrequencies();
 		const uint32 (&upTable)[256] = useFreq ? LinearSlideUpTable : LinearSlideDownTable;
@@ -2029,6 +2027,8 @@ void CSoundFile::ProcessSampleAutoVibrato(ModChannel &chn, int &period, Tuning::
 void CSoundFile::ProcessRamping(ModChannel &chn) const
 {
 	chn.leftRamp = chn.rightRamp = 0;
+	LimitMax(chn.newLeftVol, int32_max >> VOLUMERAMPPRECISION);
+	LimitMax(chn.newRightVol, int32_max >> VOLUMERAMPPRECISION);
 	if(chn.dwFlags[CHN_VOLUMERAMP] && (chn.leftVol != chn.newLeftVol || chn.rightVol != chn.newRightVol))
 	{
 		const bool rampUp = (chn.newLeftVol > chn.leftVol) || (chn.newRightVol > chn.rightVol);
@@ -2222,7 +2222,7 @@ bool CSoundFile::ReadNote()
 		const ModInstrument *pIns = chn.pModInstrument;
 
 		// Calc Frequency
-		int period;
+		int32 period = 0;
 
 		// Also process envelopes etc. when there's a plugin on this channel, for possible fake automation using volume and pan data.
 		// We only care about master channels, though, since automation only "happens" on them.
@@ -2257,7 +2257,9 @@ bool CSoundFile::ReadNote()
 				ProcessVolumeEnvelope(chn, vol);
 				ProcessInstrumentFade(chn, vol);
 				ProcessPanningEnvelope(chn);
-				ProcessPitchPanSeparation(chn);
+
+				if(!m_playBehaviour[kITPitchPanSeparation] && chn.nNote != NOTE_NONE && chn.pModInstrument && chn.pModInstrument->nPPS != 0)
+					ProcessPitchPanSeparation(chn.nRealPan, chn.nNote, *chn.pModInstrument);
 			} else
 			{
 				// No Envelope: key off => note cut
@@ -2267,6 +2269,10 @@ bool CSoundFile::ReadNote()
 					vol = 0;
 				}
 			}
+			
+			if(chn.isPaused)
+				vol = 0;
+
 			// vol is 14-bits
 			if (vol)
 			{
@@ -2296,6 +2302,11 @@ bool CSoundFile::ReadNote()
 				&& !PeriodsAreFrequencies())
 			{
 				chn.nPeriod = m_nMinPeriod;
+			} else if(chn.nPeriod >= m_nMaxPeriod && m_playBehaviour[kApplyUpperPeriodLimit] && !PeriodsAreFrequencies())
+			{
+				// ...but on the other hand, ST3's SoundBlaster driver clamps the maximum channel period.
+				// Test case: PeriodLimitUpper.s3m
+				chn.nPeriod = m_nMaxPeriod;
 			}
 			if(m_playBehaviour[kFT2Periods]) Clamp(chn.nPeriod, 1, 31999);
 			period = chn.nPeriod;
@@ -2470,7 +2481,7 @@ bool CSoundFile::ReadNote()
 		}
 
 		// Volume ramping
-		chn.dwFlags.set(CHN_VOLUMERAMP, (chn.nRealVolume | chn.rightVol | chn.leftVol) != 0);
+		chn.dwFlags.set(CHN_VOLUMERAMP, (chn.nRealVolume | chn.rightVol | chn.leftVol) != 0 && !chn.dwFlags[CHN_ADLIB]);
 
 		constexpr uint8 VUMETER_DECAY = 4;
 		chn.nLeftVU = (chn.nLeftVU > VUMETER_DECAY) ? (chn.nLeftVU - VUMETER_DECAY) : 0;
@@ -2478,7 +2489,7 @@ bool CSoundFile::ReadNote()
 
 		chn.newLeftVol = chn.newRightVol = 0;
 		chn.pCurrentSample = (chn.pModSample && chn.pModSample->HasSampleData() && chn.nLength && chn.IsSamplePlaying()) ? chn.pModSample->samplev() : nullptr;
-		if (chn.pCurrentSample || (chn.HasMIDIOutput() && !chn.dwFlags[CHN_KEYOFF | CHN_NOTEFADE]))
+		if(chn.pCurrentSample || (chn.HasMIDIOutput() && !chn.dwFlags[CHN_KEYOFF | CHN_NOTEFADE]))
 		{
 			// Update VU-Meter (nRealVolume is 14-bit)
 			uint32 vul = (chn.nRealVolume * (256-chn.nRealPan)) / (1 << 14);
@@ -2507,13 +2518,11 @@ bool CSoundFile::ReadNote()
 #endif // MODPLUG_TRACKER
 
 			// Adjusting volumes
-			if (m_MixerSettings.gnChannels >= 2)
 			{
-				int32 pan = chn.nRealPan;
-				Limit(pan, 0, 256);
+				int32 pan = (m_MixerSettings.gnChannels >= 2) ? Clamp(chn.nRealPan, 0, 256) : 128;
 
 				int32 realvol;
-				if (m_PlayConfig.getUseGlobalPreAmp())
+				if(m_PlayConfig.getUseGlobalPreAmp())
 				{
 					realvol = (chn.nRealVolume * kChnMasterVol) / 128;
 				} else
@@ -2525,7 +2534,7 @@ bool CSoundFile::ReadNote()
 				const PanningMode panningMode = m_PlayConfig.getPanningMode();
 				if(panningMode == PanningMode::SoftPanning || (panningMode == PanningMode::Undetermined && (m_MixerSettings.MixerFlags & SNDMIX_SOFTPANNING)))
 				{
-					if (pan < 128)
+					if(pan < 128)
 					{
 						chn.newLeftVol = (realvol * 128) / 256;
 						chn.newRightVol = (realvol * pan) / 256;
@@ -2550,11 +2559,6 @@ bool CSoundFile::ReadNote()
 					chn.newLeftVol = (realvol * (256 - pan)) / 256;
 					chn.newRightVol = (realvol * pan) / 256;
 				}
-
-			} else
-			{
-				chn.newLeftVol = (chn.nRealVolume * kChnMasterVol) / 256;
-				chn.newRightVol = chn.newLeftVol;
 			}
 			// Clipping volumes
 			//if (chn.nNewRightVol > 0xFFFF) chn.nNewRightVol = 0xFFFF;
@@ -2591,7 +2595,7 @@ bool CSoundFile::ReadNote()
 			chn.newRightVol /= (1 << extraAttenuation);
 
 			// Dolby Pro-Logic Surround
-			if(chn.dwFlags[CHN_SURROUND] && m_MixerSettings.gnChannels == 2) chn.newRightVol = - chn.newRightVol;
+			if(chn.dwFlags[CHN_SURROUND] && m_MixerSettings.gnChannels == 2) chn.newRightVol = -chn.newRightVol;
 
 			// Checking Ping-Pong Loops
 			if(chn.dwFlags[CHN_PINGPONGFLAG]) chn.increment.Negate();

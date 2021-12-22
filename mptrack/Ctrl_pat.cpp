@@ -1,5 +1,5 @@
 /*
- * ctrl_pat.cpp
+ * Ctrl_pat.cpp
  * ------------
  * Purpose: Pattern tab, upper panel.
  * Notes  : (currently none)
@@ -864,7 +864,7 @@ void CCtrlPatterns::OnPatternDuplicate()
 	if(outOfPatterns)
 	{
 		const auto &specs = m_sndFile.GetModSpecifications();
-		Reporting::Error(MPT_FORMAT("Pattern limit of the {} format ({} patterns) has been reached.")(mpt::ToUpperCaseAscii(specs.fileExtension), specs.patternsMax), "Duplicate Patterns");
+		Reporting::Error(MPT_AFORMAT("Pattern limit of the {} format ({} patterns) has been reached.")(mpt::ToUpperCaseAscii(specs.fileExtension), specs.patternsMax), "Duplicate Patterns");
 	}
 	SwitchToView();
 }
@@ -898,7 +898,7 @@ void CCtrlPatterns::OnPatternMerge()
 	const auto format = mpt::ToUpperCaseAscii(specs.fileExtension);
 	if(numRows > specs.patternRowsMax)
 	{
-		Reporting::Error(MPT_FORMAT("Merged pattern size ({} rows) exceeds the row limit ({} rows) of the {} format.")(numRows, specs.patternRowsMax, format), "Merge Patterns");
+		Reporting::Error(MPT_AFORMAT("Merged pattern size ({} rows) exceeds the row limit ({} rows) of the {} format.")(numRows, specs.patternRowsMax, format), "Merge Patterns");
 		SwitchToView();
 		return;
 	}
@@ -908,7 +908,7 @@ void CCtrlPatterns::OnPatternMerge()
 	if(newPat == PATTERNINDEX_INVALID)
 	{
 		cs.Leave();
-		Reporting::Error(MPT_FORMAT("Pattern limit of the {} format ({} patterns) has been reached.")(format, specs.patternsMax), "Merge Patterns");
+		Reporting::Error(MPT_AFORMAT("Pattern limit of the {} format ({} patterns) has been reached.")(format, specs.patternsMax), "Merge Patterns");
 		SwitchToView();
 		return;
 	}

@@ -249,8 +249,10 @@ BOOL CAboutDlg::OnInitDialog()
 	CDialog::OnInitDialog();
 
 	mpt::ustring app;
-	app += MPT_UFORMAT("OpenMPT ({}) ({} bit)")(mpt::OS::Windows::Name(mpt::OS::Windows::GetProcessArchitecture()), mpt::arch_bits)
-		+ (!BuildVariants().CurrentBuildIsModern() ? U_(" for older Windows") : U_(""))
+	app += MPT_UFORMAT("OpenMPT{} ({} ({} bit))")(
+			BuildVariants().GetBuildVariantDescription(BuildVariants().GetBuildVariant()),
+			mpt::OS::Windows::Name(mpt::OS::Windows::GetProcessArchitecture()),
+			mpt::arch_bits)
 		+ U_("\n");
 	app += U_("Version ") + Build::GetVersionStringSimple() + U_("\n\n");
 	app += Build::GetURL(Build::Url::Website) + U_("\n");
@@ -294,14 +296,15 @@ void CAboutDlg::OnTabChange(NMHDR * /*pNMHDR*/ , LRESULT * /*pResult*/ )
 }
 
 
+#ifdef MPT_ENABLE_ARCH_INTRINSICS
 static mpt::ustring ProcSupportToString(uint32 procSupport)
 {
 	std::vector<mpt::ustring> features;
-#if MPT_COMPILER_MSVC && defined(ENABLE_ASM)
-#if defined(ENABLE_X86)
+#if MPT_COMPILER_MSVC
+#if defined(MPT_ENABLE_ARCH_X86)
 	features.push_back(U_("x86"));
 #endif
-#if defined(ENABLE_X64)
+#if defined(MPT_ENABLE_ARCH_AMD64)
 	features.push_back(U_("amd64"));
 #endif
 	struct ProcFlag
@@ -312,27 +315,15 @@ static mpt::ustring ProcSupportToString(uint32 procSupport)
 	static constexpr ProcFlag flags[] =
 	{
 		{ 0, "" },
-#if defined(ENABLE_MMX)
+#if defined(MPT_ENABLE_ARCH_X86) || defined(MPT_ENABLE_ARCH_AMD64)
 		{ CPU::feature::mmx, "mmx" },
-#endif
-#if defined(ENABLE_SSE)
 		{ CPU::feature::sse, "sse" },
-#endif
-#if defined(ENABLE_SSE2)
 		{ CPU::feature::sse2, "sse2" },
-#endif
-#if defined(ENABLE_SSE3)
 		{ CPU::feature::sse3, "sse3" },
 		{ CPU::feature::ssse3, "ssse3" },
-#endif
-#if defined(ENABLE_SSE4)
 		{ CPU::feature::sse4_1, "sse4.1" },
 		{ CPU::feature::sse4_2, "sse4.2" },
-#endif
-#if defined(ENABLE_AVX)
 		{ CPU::feature::avx, "avx" },
-#endif
-#if defined(ENABLE_AVX2)
 		{ CPU::feature::avx2, "avx2" },
 #endif
 	};
@@ -345,6 +336,7 @@ static mpt::ustring ProcSupportToString(uint32 procSupport)
 #endif
 	return mpt::String::Combine(features, U_(" "));
 }
+#endif // MPT_ENABLE_ARCH_INTRINSICS
 
 
 mpt::ustring CAboutDlg::GetTabText(int tab)
@@ -352,6 +344,9 @@ mpt::ustring CAboutDlg::GetTabText(int tab)
 	const mpt::ustring lf = U_("\n");
 	const mpt::ustring yes = U_("yes");
 	const mpt::ustring no = U_("no");
+#ifdef MPT_ENABLE_ARCH_INTRINSICS
+	const CPU::Info CPUInfo = CPU::Info::Get();
+#endif // MPT_ENABLE_ARCH_INTRINSICS
 	mpt::ustring text;
 	switch(tab)
 	{
@@ -370,42 +365,38 @@ mpt::ustring CAboutDlg::GetTabText(int tab)
 				#if MPT_COMPILER_MSVC
 					#if defined(_M_X64)
 						features.push_back(U_("x86-64"));
-						if(CPU::GetMinimumAVXVersion() >= 1) features.push_back(U_("avx"));
-						if(CPU::GetMinimumAVXVersion() >= 2) features.push_back(U_("avx2"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::avx) features.push_back(U_("avx"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::avx2) features.push_back(U_("avx2"));
 					#elif defined(_M_IX86)
-						if(CPU::GetMinimumSSEVersion() <= 0 && CPU::GetMinimumAVXVersion() <= 0 ) features.push_back(U_("fpu"));
-						if(CPU::GetMinimumSSEVersion() >= 1) features.push_back(U_("cmov"));
-						if(CPU::GetMinimumSSEVersion() >= 1) features.push_back(U_("sse"));
-						if(CPU::GetMinimumSSEVersion() >= 2) features.push_back(U_("sse2"));
-						if(CPU::GetMinimumAVXVersion() >= 1) features.push_back(U_("avx"));
-						if(CPU::GetMinimumAVXVersion() >= 2) features.push_back(U_("avx2"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::sse) features.push_back(U_("sse"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::sse2) features.push_back(U_("sse2"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::avx) features.push_back(U_("avx"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::avx2) features.push_back(U_("avx2"));
 					#else
-						if(CPU::GetMinimumSSEVersion() <= 0 && CPU::GetMinimumAVXVersion() <= 0 ) features.push_back(U_("fpu"));
-						if(CPU::GetMinimumSSEVersion() >= 1) features.push_back(U_("cmov"));
-						if(CPU::GetMinimumSSEVersion() >= 1) features.push_back(U_("sse"));
-						if(CPU::GetMinimumSSEVersion() >= 2) features.push_back(U_("sse2"));
-						if(CPU::GetMinimumAVXVersion() >= 1) features.push_back(U_("avx"));
-						if(CPU::GetMinimumAVXVersion() >= 2) features.push_back(U_("avx2"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::sse) features.push_back(U_("sse"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::sse2) features.push_back(U_("sse2"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::avx) features.push_back(U_("avx"));
+						if(CPU::GetMinimumFeatures() & CPU::feature::avx2) features.push_back(U_("avx2"));
 					#endif
 				#endif
 				text += mpt::String::Combine(features, U_(" "));
 				text += lf;
 			}
-#ifdef ENABLE_ASM
+#ifdef MPT_ENABLE_ARCH_INTRINSICS
 			text += MPT_UFORMAT("Optional CPU features used: {}\n")(ProcSupportToString(CPU::GetEnabledFeatures()));
-#endif // ENABLE_ASM
+#endif // MPT_ENABLE_ARCH_INTRINSICS
 			text += lf;
 			text += MPT_UFORMAT("System Architecture: {}\n")(mpt::OS::Windows::Name(mpt::OS::Windows::GetHostArchitecture()));
-#ifdef ENABLE_ASM
+#ifdef MPT_ENABLE_ARCH_INTRINSICS
 			text += MPT_UFORMAT("CPU: {}, Family {}, Model {}, Stepping {}\n")
-				( mpt::ToUnicode(mpt::Charset::ASCII, (std::strlen(CPU::ProcVendorID) > 0) ? std::string(CPU::ProcVendorID) : std::string("Generic"))
-				, CPU::ProcFamily
-				, CPU::ProcModel
-				, CPU::ProcStepping
+				( mpt::ToUnicode(mpt::Charset::ASCII, (std::strlen(CPUInfo.VendorID) > 0) ? std::string(CPUInfo.VendorID) : std::string("Generic"))
+				, CPUInfo.Family
+				, CPUInfo.Model
+				, CPUInfo.Stepping
 				);
-			text += MPT_UFORMAT("CPU Name: {}\n")(mpt::ToUnicode(mpt::Charset::ASCII, (std::strlen(CPU::ProcBrandID) > 0) ? std::string(CPU::ProcBrandID) : std::string("")));
-			text += MPT_UFORMAT("Available CPU features: {}\n")(ProcSupportToString(CPU::GetAvailableFeatures()));
-#endif // ENABLE_ASM
+			text += MPT_UFORMAT("CPU Name: {}\n")(mpt::ToUnicode(mpt::Charset::ASCII, (std::strlen(CPUInfo.BrandID) > 0) ? std::string(CPUInfo.BrandID) : std::string("")));
+			text += MPT_UFORMAT("Available CPU features: {}\n")(ProcSupportToString(CPUInfo.AvailableFeatures));
+#endif // MPT_ENABLE_ARCH_INTRINSICS
 			text += MPT_UFORMAT("Operating System: {}\n\n")(mpt::OS::Windows::Version::Current().GetName());
 			text += MPT_UFORMAT("OpenMPT Install Path{1}: {0}\n")(theApp.GetInstallPath(), theApp.IsPortableMode() ? U_(" (portable)") : U_(""));
 			text += MPT_UFORMAT("OpenMPT Executable Path{1}: {0}\n")(theApp.GetInstallBinArchPath(), theApp.IsPortableMode() ? U_(" (portable)") : U_(""));

@@ -44,10 +44,10 @@ static constexpr auto GLOBALVOL_7BIT_FORMATS = MOD_TYPE_IT | MOD_TYPE_MPT | MOD_
 
 
 // Compensate frequency slide LUTs depending on whether we are handling periods or frequency - "up" and "down" in function name are seen from frequency perspective.
-static uint32 GetLinearSlideDownTable    (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(LinearSlideDownTable));     return sndFile->m_playBehaviour[kHertzInLinearMode] ? LinearSlideDownTable[i]     : LinearSlideUpTable[i]; }
-static uint32 GetLinearSlideUpTable      (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(LinearSlideDownTable));     return sndFile->m_playBehaviour[kHertzInLinearMode] ? LinearSlideUpTable[i]       : LinearSlideDownTable[i]; }
-static uint32 GetFineLinearSlideDownTable(const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(FineLinearSlideDownTable)); return sndFile->m_playBehaviour[kHertzInLinearMode] ? FineLinearSlideDownTable[i] : FineLinearSlideUpTable[i]; }
-static uint32 GetFineLinearSlideUpTable  (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(FineLinearSlideDownTable)); return sndFile->m_playBehaviour[kHertzInLinearMode] ? FineLinearSlideUpTable[i]   : FineLinearSlideDownTable[i]; }
+static uint32 GetLinearSlideDownTable    (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(LinearSlideDownTable));     return sndFile->m_playBehaviour[kPeriodsAreHertz] ? LinearSlideDownTable[i]     : LinearSlideUpTable[i]; }
+static uint32 GetLinearSlideUpTable      (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(LinearSlideDownTable));     return sndFile->m_playBehaviour[kPeriodsAreHertz] ? LinearSlideUpTable[i]       : LinearSlideDownTable[i]; }
+static uint32 GetFineLinearSlideDownTable(const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(FineLinearSlideDownTable)); return sndFile->m_playBehaviour[kPeriodsAreHertz] ? FineLinearSlideDownTable[i] : FineLinearSlideUpTable[i]; }
+static uint32 GetFineLinearSlideUpTable  (const CSoundFile *sndFile, uint32 i) { MPT_ASSERT(i < std::size(FineLinearSlideDownTable)); return sndFile->m_playBehaviour[kPeriodsAreHertz] ? FineLinearSlideUpTable[i]   : FineLinearSlideDownTable[i]; }
 
 
 ////////////////////////////////////////////////////////////
@@ -95,9 +95,10 @@ public:
 		state->m_nMusicTempo = sndFile.m_nDefaultTempo;
 		state->m_nGlobalVolume = sndFile.m_nDefaultGlobalVolume;
 		chnSettings.assign(sndFile.GetNumChannels(), ChnSettings());
+		const auto muteFlag = CSoundFile::GetChannelMuteFlag();
 		for(CHANNELINDEX chn = 0; chn < sndFile.GetNumChannels(); chn++)
 		{
-			state->Chn[chn].Reset(ModChannel::resetTotal, sndFile, chn);
+			state->Chn[chn].Reset(ModChannel::resetTotal, sndFile, chn, muteFlag);
 			state->Chn[chn].nOldGlobalVolSlide = 0;
 			state->Chn[chn].nOldChnVolSlide = 0;
 			state->Chn[chn].nNote = state->Chn[chn].nNewNote = state->Chn[chn].nLastNote = NOTE_NONE;
@@ -115,7 +116,8 @@ public:
 			return;
 		}
 
-		const SmpLength sampleEnd = chn.dwFlags[CHN_LOOP] ? chn.nLoopEnd : chn.nLength;
+		const SamplePosition loopStart(chn.dwFlags[CHN_LOOP] ? chn.nLoopStart : 0u, 0);
+		const SamplePosition sampleEnd(chn.dwFlags[CHN_LOOP] ? chn.nLoopEnd : chn.nLength, 0);
 		const SmpLength loopLength = chn.nLoopEnd - chn.nLoopStart;
 		const bool itEnvMode = sndFile.m_playBehaviour[kITEnvelopePositionHandling];
 		const bool updatePitchEnv = (chn.PitchEnv.flags & (ENV_ENABLED | ENV_FILTER)) == ENV_ENABLED;
@@ -146,7 +148,7 @@ public:
 				updateInc = true;
 			}
 
-			int period = chn.nPeriod;
+			int32 period = chn.nPeriod;
 			if(itEnvMode) sndFile.IncrementEnvelopePositions(chn);
 			if(updatePitchEnv)
 			{
@@ -178,52 +180,50 @@ public:
 
 			chn.position += inc;
 
-			if(chn.position.GetUInt() >= sampleEnd)
+			if(chn.position >= sampleEnd || (chn.position < loopStart && inc.IsNegative()))
 			{
-				if(chn.dwFlags[CHN_LOOP])
-				{
-					// We exceeded the sample loop, go back to loop start.
-					if(chn.dwFlags[CHN_PINGPONGLOOP])
-					{
-						if(chn.position < SamplePosition(chn.nLoopStart, 0))
-						{
-							chn.position = SamplePosition(chn.nLoopStart + chn.nLoopStart, 0) - chn.position;
-							chn.dwFlags.flip(CHN_PINGPONGFLAG);
-							inc.Negate();
-						}
-						SmpLength posInt = chn.position.GetUInt() - chn.nLoopStart;
-						SmpLength pingpongLength = loopLength * 2;
-						if(sndFile.m_playBehaviour[kITPingPongMode]) pingpongLength--;
-						posInt %= pingpongLength;
-						bool forward = (posInt < loopLength);
-						if(forward)
-							chn.position.SetInt(chn.nLoopStart + posInt);
-						else
-							chn.position.SetInt(chn.nLoopEnd - (posInt - loopLength));
-						if(forward == chn.dwFlags[CHN_PINGPONGFLAG])
-						{
-							chn.dwFlags.flip(CHN_PINGPONGFLAG);
-							inc.Negate();
-						}
-					} else
-					{
-						SmpLength posInt = chn.position.GetUInt();
-						if(posInt >= chn.nLoopEnd + loopLength)
-						{
-							const SmpLength overshoot = posInt - chn.nLoopEnd;
-							posInt -= (overshoot / loopLength) * loopLength;
-						}
-						while(posInt >= chn.nLoopEnd)
-						{
-							posInt -= loopLength;
-						}
-						chn.position.SetInt(posInt);
-					}
-				} else
+				if(!chn.dwFlags[CHN_LOOP])
 				{
 					// Past sample end.
 					stopNote = true;
 					break;
+				}
+				// We exceeded the sample loop, go back to loop start.
+				if(chn.dwFlags[CHN_PINGPONGLOOP])
+				{
+					if(chn.position < loopStart)
+					{
+						chn.position = SamplePosition(chn.nLoopStart + chn.nLoopStart, 0) - chn.position;
+						chn.dwFlags.flip(CHN_PINGPONGFLAG);
+						inc.Negate();
+					}
+					SmpLength posInt = chn.position.GetUInt() - chn.nLoopStart;
+					SmpLength pingpongLength = loopLength * 2;
+					if(sndFile.m_playBehaviour[kITPingPongMode]) pingpongLength--;
+					posInt %= pingpongLength;
+					bool forward = (posInt < loopLength);
+					if(forward)
+						chn.position.SetInt(chn.nLoopStart + posInt);
+					else
+						chn.position.SetInt(chn.nLoopEnd - (posInt - loopLength));
+					if(forward == chn.dwFlags[CHN_PINGPONGFLAG])
+					{
+						chn.dwFlags.flip(CHN_PINGPONGFLAG);
+						inc.Negate();
+					}
+				} else
+				{
+					SmpLength posInt = chn.position.GetUInt();
+					if(posInt >= chn.nLoopEnd + loopLength)
+					{
+						const SmpLength overshoot = posInt - chn.nLoopEnd;
+						posInt -= (overshoot / loopLength) * loopLength;
+					}
+					while(posInt >= chn.nLoopEnd)
+					{
+						posInt -= loopLength;
+					}
+					chn.position.SetInt(posInt);
 				}
 			}
 		}
@@ -282,11 +282,6 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 		forbiddenCommands.set(CMD_NOTESLIDEDOWN);  forbiddenCommands.set(CMD_NOTESLIDEDOWNRETRIG);
 		forbiddenVolCommands.set(VOLCMD_PORTAUP);  forbiddenVolCommands.set(VOLCMD_PORTADOWN);
 
-		// Optimize away channels for which it's pointless to adjust sample positions
-		for(CHANNELINDEX i = 0; i < GetNumChannels(); i++)
-		{
-			if(ChnSettings[i].dwFlags[CHN_MUTE]) memory.chnSettings[i].ticksToRender = GetLengthMemory::IGNORE_CHANNEL;
-		}
 		if(target.mode == GetLengthTarget::SeekPosition && target.pos.order < orderList.size())
 		{
 			// If we know where to seek, we can directly rule out any channels on which a new note would be triggered right at the start.
@@ -589,7 +584,7 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 					if(chn.rowCommand.vol)
 					{
 						const auto [porta, clearEffectCommand] = GetVolCmdTonePorta(chn.rowCommand, 0);
-						chn.nPortamentoSlide = porta * 4;
+						chn.portamentoSlide = porta;
 						if(clearEffectCommand)
 							command = CMD_NONE;
 					}
@@ -716,7 +711,7 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 				break;
 			// Tone-Portamento
 			case CMD_TONEPORTAMENTO:
-				if (param) chn.nPortamentoSlide = param << 2;
+				if (param) chn.portamentoSlide = param;
 				break;
 			// Offset
 			case CMD_OFFSET:
@@ -960,7 +955,10 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 					{
 						chn.nPan = setPan;
 					}
+				}
 
+				if(m.IsNote() || m_playBehaviour[kApplyOffsetWithoutNote])
+				{
 					if(m.command == CMD_OFFSET)
 					{
 						ProcessSampleOffset(chn, nChn, playState);
@@ -974,7 +972,7 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 						startTick = playState.m_nMusicSpeed - 1;
 					} else if(m.volcmd == VOLCMD_OFFSET)
 					{
-						if(m.vol <= std::size(chn.pModSample->cues) && chn.pModSample != nullptr)
+						if(chn.pModSample != nullptr && m.vol <= std::size(chn.pModSample->cues))
 						{
 							SmpLength offset;
 							if(m.vol == 0)
@@ -1120,8 +1118,14 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 							}
 						}
 						break;
+					case VOLCMD_PLAYCONTROL:
+						if(m.vol <= 1)
+							chn.isPaused = (m.vol == 0);
+						break;
 					}
 
+					if(chn.isPaused)
+						continue;
 					if(porta)
 					{
 						// Portamento needs immediate syncing, as the pitch changes on each tick
@@ -1137,7 +1141,7 @@ std::vector<GetLengthType> CSoundFile::GetLength(enmGetLengthResetMode adjustMod
 		}
 		oldTickDuration = tickDuration;
 
-		breakToRow = HandleNextRow(playState, false);
+		breakToRow = HandleNextRow(playState, orderList, false);
 	}
 
 	// Now advance the sample positions for sample seeking on channels that are still playing
@@ -1611,7 +1615,9 @@ void CSoundFile::InstrumentChange(ModChannel &chn, uint32 instr, bool bPorta, bo
 
 void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetEnv, bool bManual, CHANNELINDEX channelHint) const
 {
-	if (note < NOTE_MIN) return;
+	if(note < NOTE_MIN)
+		return;
+	const int origNote = note;
 	const ModSample *pSmp = chn.pModSample;
 	const ModInstrument *pIns = chn.pModInstrument;
 
@@ -1670,7 +1676,7 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 			}
 		}
 
-		// IT compatibility tentative fix: Clear channel note memory.
+		// IT compatibility tentative fix: Clear channel note memory (TRANCE_N.IT by A3F).
 		if(m_playBehaviour[kITClearOldNoteAfterCut])
 		{
 			chn.nNote = chn.nNewNote = NOTE_NONE;
@@ -1737,6 +1743,7 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 		chn.nNote = static_cast<ModCommand::NOTE>(note);
 	}
 	chn.m_CalculateFreq = true;
+	chn.isPaused = false;
 
 	if ((!bPorta) || (GetType() & (MOD_TYPE_S3M|MOD_TYPE_IT|MOD_TYPE_MPT)))
 		chn.nNewIns = 0;
@@ -1746,7 +1753,17 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 
 	// IT compatibility: Sample and instrument panning is only applied on note change, not instrument change
 	// Test case: PanReset.it
-	if(m_playBehaviour[kITPanningReset]) ApplyInstrumentPanning(chn, pIns, pSmp);
+	if(m_playBehaviour[kITPanningReset])
+		ApplyInstrumentPanning(chn, pIns, pSmp);
+
+	// IT compatibility: Pitch/Pan Separation can be overriden by panning commands, and shouldn't be affected by note-off commands
+	// Test case: PitchPanReset.it
+	if(m_playBehaviour[kITPitchPanSeparation] && pIns && pIns->nPPS)
+	{
+		if(!chn.nRestorePanOnNewNote)
+			chn.nRestorePanOnNewNote = static_cast<uint16>(chn.nPan + 1);
+		ProcessPitchPanSeparation(chn.nPan, origNote, *pIns);
+	}
 
 	if(bResetEnv && !bPorta)
 	{
@@ -1807,6 +1824,7 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 			if(bPorta || !(m_playBehaviour[kFT2PortaTargetNoReset] || m_playBehaviour[kITClearPortaTarget] || GetType() == MOD_TYPE_MOD))
 			{
 				chn.nPortamentoDest = period;
+				chn.portaTargetReached = false;
 			}
 		}
 
@@ -1842,7 +1860,7 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 			// ProTracker "oneshot" loops (if loop start is 0, play the whole sample once and then repeat until loop end)
 			if(m_playBehaviour[kMODOneShotLoops] && chn.nLoopStart == 0) chn.nLoopEnd = chn.nLength = pSmp->nLength;
 
-			if(chn.dwFlags[CHN_REVERSE])
+			if(chn.dwFlags[CHN_REVERSE] && chn.nLength > 0)
 			{
 				chn.dwFlags.set(CHN_PINGPONGFLAG);
 				chn.position.SetInt(chn.nLength - 1);
@@ -1960,8 +1978,15 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 		}
 	}
 
-	if(m_playBehaviour[kOPLNoteStopWith0Hz] && chn.dwFlags[CHN_ADLIB] && m_opl && channelHint != CHANNELINDEX_INVALID)
-		m_opl->Frequency(channelHint, 0, true, false);
+		if(chn.dwFlags[CHN_ADLIB] && m_opl && channelHint != CHANNELINDEX_INVALID)
+		{
+			// Test case: AdlibZeroVolumeNote.s3m
+			if(m_playBehaviour[kOPLNoteOffOnNoteChange])
+				m_opl->NoteOff(channelHint);
+			else if(m_playBehaviour[kOPLNoteStopWith0Hz])
+				m_opl->Frequency(channelHint, 0, true, false);
+		}
+	}
 
 	// Special case for MPT
 	if (bManual) chn.dwFlags.reset(CHN_MUTE);
@@ -1980,7 +2005,7 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 }
 
 
-// Apply sample or instrumernt panning
+// Apply sample or instrument panning
 void CSoundFile::ApplyInstrumentPanning(ModChannel &chn, const ModInstrument *instr, const ModSample *smp) const
 {
 	int32 newPan = int32_min;
@@ -2068,6 +2093,12 @@ CHANNELINDEX CSoundFile::CheckNNA(CHANNELINDEX nChn, uint32 instr, int note, boo
 		if(!srcChn.nLength || srcChn.dwFlags[CHN_MUTE] || !(srcChn.rightVol | srcChn.leftVol))
 			return CHANNELINDEX_INVALID;
 
+		if(srcChn.dwFlags[CHN_ADLIB] && m_opl)
+		{
+			m_opl->NoteCut(nChn, false);
+			return CHANNELINDEX_INVALID;
+		}
+
 		const CHANNELINDEX nnaChn = GetNNAChannel(nChn);
 		if(nnaChn == CHANNELINDEX_INVALID)
 			return CHANNELINDEX_INVALID;
@@ -2087,10 +2118,6 @@ CHANNELINDEX CSoundFile::CheckNNA(CHANNELINDEX nChn, uint32 instr, int note, boo
 		srcChn.position.Set(0);
 		srcChn.nROfs = srcChn.nLOfs = 0;
 		srcChn.rightVol = srcChn.leftVol = 0;
-		if(srcChn.dwFlags[CHN_ADLIB] && m_opl)
-		{
-			m_opl->NoteCut(nChn);
-		}
 		return nnaChn;
 	}
 	if(instr > GetNumInstruments())
@@ -2508,6 +2535,7 @@ bool CSoundFile::ProcessEffects()
 		{
 			chn.isFirstTick = tickCount == nStartTick;
 		}
+		chn.triggerNote = triggerNote;
 
 		// FT2 compatibility: Note + portamento + note delay = no portamento
 		// Test case: PortaDelay.xm
@@ -2592,7 +2620,6 @@ bool CSoundFile::ProcessEffects()
 			// Now it's time for some FT2 crap...
 			if (GetType() & (MOD_TYPE_XM | MOD_TYPE_MT2))
 			{
-
 				// XM: Key-Off + Sample == Note Cut (BUT: Only if no instr number or volume effect is present!)
 				// Test case: NoteOffVolume.xm
 				if(note == NOTE_KEYOFF
@@ -3007,7 +3034,7 @@ bool CSoundFile::ProcessEffects()
 					break;
 
 				case VOLCMD_OFFSET:
-					if (triggerNote && chn.pModSample && vol <= std::size(chn.pModSample->cues))
+					if(triggerNote && chn.pModSample && vol <= std::size(chn.pModSample->cues))
 					{
 						SmpLength offset;
 						if(vol == 0)
@@ -3016,6 +3043,11 @@ bool CSoundFile::ProcessEffects()
 							offset = chn.oldOffset = chn.pModSample->cues[vol - 1];
 						SampleOffset(chn, offset);
 					}
+					break;
+
+				case VOLCMD_PLAYCONTROL:
+					if(vol <= 1)
+						chn.isPaused = (vol == 0);
 					break;
 				}
 			}
@@ -3052,7 +3084,7 @@ bool CSoundFile::ProcessEffects()
 
 		// Tone-Portamento
 		case CMD_TONEPORTAMENTO:
-			TonePortamento(chn, param);
+			TonePortamento(chn, static_cast<uint16>(param));
 			break;
 
 		// Tone-Portamento + Volume Slide
@@ -3100,7 +3132,7 @@ bool CSoundFile::ProcessEffects()
 
 		// Set Offset
 		case CMD_OFFSET:
-			if (triggerNote)
+			if(triggerNote)
 			{
 				// FT2 compatibility: Portamento + Offset = Ignore offset
 				// Test case: porta-offset.xm
@@ -3165,8 +3197,11 @@ bool CSoundFile::ProcessEffects()
 				if(param && !m_SongFlags[SONG_ITOLDEFFECTS])
 				{
 					// Old effects have different length interpretation (+1 for both on and off)
-					if(param & 0xF0) param -= 0x10;
-					if(param & 0x0F) param -= 0x01;
+					if(param & 0xF0)
+						param -= 0x10;
+					if(param & 0x0F)
+						param -= 0x01;
+					chn.nTremorParam = static_cast<ModCommand::PARAM>(param);
 				}
 				chn.nTremorCount |= 0x80; // set on/off flag
 			} else if(m_playBehaviour[kFT2Tremor])
@@ -3176,7 +3211,8 @@ bool CSoundFile::ProcessEffects()
 			}
 
 			chn.nCommand = CMD_TREMOR;
-			if (param) chn.nTremorParam = static_cast<ModCommand::PARAM>(param);
+			if(param)
+				chn.nTremorParam = static_cast<ModCommand::PARAM>(param);
 
 			break;
 
@@ -3397,13 +3433,13 @@ bool CSoundFile::ProcessEffects()
 		case CMD_DBMECHO:
 			if(m_PlayState.m_nTickCount == 0)
 			{
-				uint32 chns = (param >> 4), enable = (param & 0x0F);
-				if(chns > 1 || enable > 2)
+				uint32 echoType = (param >> 4), enable = (param & 0x0F);
+				if(echoType > 2 || enable > 1)
 				{
 					break;
 				}
 				CHANNELINDEX firstChn = nChn, lastChn = nChn;
-				if(chns == 1)
+				if(echoType == 1)
 				{
 					firstChn = 0;
 					lastChn = m_nChannels - 1;
@@ -3434,14 +3470,14 @@ bool CSoundFile::ProcessEffects()
 	// Navigation Effects
 	if(m_SongFlags[SONG_FIRSTTICK])
 	{
-		if(HandleNextRow(m_PlayState, true))
+		if(HandleNextRow(m_PlayState, Order(), true))
 			m_SongFlags.set(SONG_BREAKTOROW);
 	}
 	return true;
 }
 
 
-bool CSoundFile::HandleNextRow(PlayState &state, bool honorPatternLoop) const
+bool CSoundFile::HandleNextRow(PlayState &state, const ModSequence &order, bool honorPatternLoop) const
 {
 	const bool doPatternLoop = (state.m_patLoopRow != ROWINDEX_INVALID);
 	const bool doBreakRow = (state.m_breakRow != ROWINDEX_INVALID);
@@ -3464,8 +3500,8 @@ bool CSoundFile::HandleNextRow(PlayState &state, bool honorPatternLoop) const
 			state.m_breakRow = 0;
 		breakToRow = true;
 
-		if(state.m_posJump >= Order().size())
-			state.m_posJump = Order().GetRestartPos();
+		if(state.m_posJump >= order.size())
+			state.m_posJump = order.GetRestartPos();
 
 		// IT / FT2 compatibility: don't reset loop count on pattern break.
 		// Test case: gm-trippy01.it, PatLoop-Break.xm, PatLoop-Weird.xm, PatLoop-Break.mod
@@ -3687,10 +3723,10 @@ void CSoundFile::PortamentoUp(CHANNELINDEX nChn, ModCommand::PARAM param, const 
 	// Regular Slide
 	if(!chn.isFirstTick
 	   || (m_PlayState.m_nMusicSpeed == 1 && m_playBehaviour[kSlidesAtSpeed1])
-	   || GetType() == MOD_TYPE_669
+	   || (GetType() & (MOD_TYPE_669 | MOD_TYPE_OKT))
 	   || (GetType() == MOD_TYPE_MED && m_SongFlags[SONG_FASTVOLSLIDES]))
 	{
-		DoFreqSlide(chn, -int(param) * 4);
+		DoFreqSlide(chn, chn.nPeriod, param * 4);
 	}
 }
 
@@ -3755,10 +3791,10 @@ void CSoundFile::PortamentoDown(CHANNELINDEX nChn, ModCommand::PARAM param, cons
 
 	if(!chn.isFirstTick
 	   || (m_PlayState.m_nMusicSpeed == 1 && m_playBehaviour[kSlidesAtSpeed1])
-	   || GetType() == MOD_TYPE_669
+	   || (GetType() & (MOD_TYPE_669 | MOD_TYPE_OKT))
 	   || (GetType() == MOD_TYPE_MED && m_SongFlags[SONG_FASTVOLSLIDES]))
 	{
-		DoFreqSlide(chn, int(param) * 4);
+		DoFreqSlide(chn, chn.nPeriod, param * -4);
 	}
 }
 
@@ -3780,7 +3816,7 @@ void CSoundFile::MidiPortamento(CHANNELINDEX nChn, int param, bool doFineSlides)
 		if(m_PlayState.Chn[nChn].isFirstTick)
 		{
 			// Extra fine slide...
-			pitchBend = (actualParam & 0x0F) * sgn(param);
+			pitchBend = (actualParam & 0x0F) * mpt::signum(param);
 			if(actualParam >= 0xF0)
 			{
 				// ... or just a fine slide!
@@ -3824,39 +3860,8 @@ void CSoundFile::FinePortamentoUp(ModChannel &chn, ModCommand::PARAM param) cons
 		if(param) chn.nOldFinePortaUpDown = param; else param = chn.nOldFinePortaUpDown;
 	}
 
-	if(chn.isFirstTick)
-	{
-		if ((chn.nPeriod) && (param))
-		{
-			if(GetType() == MOD_TYPE_FAR)
-			{
-				chn.nPeriod += (param * 4 * 36318 / 1024);
-			} else if(m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
-			{
-				const auto oldPeriod = chn.nPeriod;
-				chn.nPeriod = Util::muldivr(chn.nPeriod, GetLinearSlideUpTable(this, param & 0x0F), 65536);
-				if(oldPeriod == chn.nPeriod)
-				{
-					if(m_playBehaviour[kHertzInLinearMode] && chn.nPeriod < Util::MaxValueOfType(chn.nPeriod))
-						chn.nPeriod++;
-					else if(!m_playBehaviour[kHertzInLinearMode] && chn.nPeriod > 1)
-						chn.nPeriod--;
-				}
-			} else
-			{
-				chn.nPeriod -= (int)(param * 4);
-				if (chn.nPeriod < 1)
-				{
-					chn.nPeriod = 1;
-					if(GetType() == MOD_TYPE_S3M)
-					{
-						chn.nFadeOutVol = 0;
-						chn.dwFlags.set(CHN_NOTEFADE | CHN_FASTVOLRAMP);
-					}
-				}
-			}
-		}
-	}
+	if(chn.isFirstTick && chn.nPeriod && param)
+		DoFreqSlide(chn, chn.nPeriod, param * 4);
 }
 
 
@@ -3873,31 +3878,11 @@ void CSoundFile::FinePortamentoDown(ModChannel &chn, ModCommand::PARAM param) co
 		if(param) chn.nOldFinePortaUpDown = param; else param = chn.nOldFinePortaUpDown;
 	}
 
-	if(chn.isFirstTick)
+	if(chn.isFirstTick && chn.nPeriod && param)
 	{
-		if ((chn.nPeriod) && (param))
-		{
-			if (GetType() == MOD_TYPE_FAR)
-			{
-				chn.nPeriod -= (param * 4 * 36318 / 1024);
-			} else if (m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
-			{
-				const auto oldPeriod = chn.nPeriod;
-				chn.nPeriod = Util::muldivr(chn.nPeriod, GetLinearSlideDownTable(this, param & 0x0F), 65536);
-				if(oldPeriod == chn.nPeriod)
-				{
-					if(!m_playBehaviour[kHertzInLinearMode] && chn.nPeriod < Util::MaxValueOfType(chn.nPeriod))
-						chn.nPeriod++;
-					else if(m_playBehaviour[kHertzInLinearMode] && chn.nPeriod > 1)
-						chn.nPeriod--;
-				}
-			} else
-			{
-				chn.nPeriod += (int)(param * 4);
-				if(chn.nPeriod > 0xFFFF)
-					chn.nPeriod = 0xFFFF;
-			}
-		}
+		DoFreqSlide(chn, chn.nPeriod, param * -4);
+		if(chn.nPeriod > 0xFFFF && !m_playBehaviour[kPeriodsAreHertz] && (!m_SongFlags[SONG_LINEARSLIDES] || GetType() == MOD_TYPE_XM))
+			chn.nPeriod = 0xFFFF;
 	}
 }
 
@@ -3915,30 +3900,8 @@ void CSoundFile::ExtraFinePortamentoUp(ModChannel &chn, ModCommand::PARAM param)
 		if(param) chn.nOldFinePortaUpDown = param; else param = chn.nOldFinePortaUpDown;
 	}
 
-	if(chn.isFirstTick)
-	{
-		if ((chn.nPeriod) && (param))
-		{
-			if(m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
-			{
-				int oldPeriod = chn.nPeriod;
-				chn.nPeriod = Util::muldivr(chn.nPeriod, GetFineLinearSlideUpTable(this, param & 0x0F), 65536);
-				if(oldPeriod == chn.nPeriod) chn.nPeriod++;
-			} else
-			{
-				chn.nPeriod -= (int)(param);
-				if (chn.nPeriod < 1)
-				{
-					chn.nPeriod = 1;
-					if(GetType() == MOD_TYPE_S3M)
-					{
-						chn.nFadeOutVol = 0;
-						chn.dwFlags.set(CHN_NOTEFADE | CHN_FASTVOLRAMP);
-					}
-				}
-			}
-		}
-	}
+	if(chn.isFirstTick && chn.nPeriod && param)
+		DoFreqSlide(chn, chn.nPeriod, param);
 }
 
 
@@ -3955,21 +3918,11 @@ void CSoundFile::ExtraFinePortamentoDown(ModChannel &chn, ModCommand::PARAM para
 		if(param) chn.nOldFinePortaUpDown = param; else param = chn.nOldFinePortaUpDown;
 	}
 
-	if(chn.isFirstTick)
+	if(chn.isFirstTick && chn.nPeriod && param)
 	{
-		if ((chn.nPeriod) && (param))
-		{
-			if(m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
-			{
-				int oldPeriod = chn.nPeriod;
-				chn.nPeriod = Util::muldivr(chn.nPeriod, GetFineLinearSlideDownTable(this, param & 0x0F), 65536);
-				if(oldPeriod == chn.nPeriod) chn.nPeriod--;
-			} else
-			{
-				chn.nPeriod += (int)(param);
-				if (chn.nPeriod > 0xFFFF) chn.nPeriod = 0xFFFF;
-			}
-		}
+		DoFreqSlide(chn, chn.nPeriod, -static_cast<int32>(param));
+		if(chn.nPeriod > 0xFFFF && !m_playBehaviour[kPeriodsAreHertz] && (!m_SongFlags[SONG_LINEARSLIDES] || GetType() == MOD_TYPE_XM))
+			chn.nPeriod = 0xFFFF;
 	}
 }
 
@@ -3992,8 +3945,9 @@ void CSoundFile::SetFinetune(CHANNELINDEX channel, PlayState &playState, bool is
 }
 
 
-// Implemented for IMF / PTM compatibility, can't actually save this in any formats
+// Implemented for IMF / PTM / OKT compatibility, can't actually save this in any formats
 // Slide up / down every x ticks by y semitones
+// Oktalyzer: Slide down on first tick only, or on every tick
 void CSoundFile::NoteSlide(ModChannel &chn, uint32 param, bool slideUp, bool retrig) const
 {
 	if(m_SongFlags[SONG_FIRSTTICK])
@@ -4003,29 +3957,32 @@ void CSoundFile::NoteSlide(ModChannel &chn, uint32 param, bool slideUp, bool ret
 		if(param & 0x0F)
 			chn.noteSlideParam = (chn.noteSlideParam & 0xF0) | static_cast<uint8>(param & 0x0F);
 		chn.noteSlideCounter = (chn.noteSlideParam >> 4);
-	} else
-	{
-		if(--chn.noteSlideCounter == 0)
-		{
-			const uint8 speed = (chn.noteSlideParam >> 4), steps = (chn.noteSlideParam & 0x0F);
-			chn.noteSlideCounter = speed;
-			// update it
-			const int32 delta = (slideUp ? steps : -steps);
-			if(chn.HasCustomTuning())
-				chn.m_PortamentoFineSteps += delta * chn.pModInstrument->pTuning->GetFineStepCount();
-			else
-				chn.nPeriod = GetPeriodFromNote(delta + GetNoteFromPeriod(chn.nPeriod), 8363, 0);
+	}
 
-			if(retrig)
-			{
-				chn.position.Set(0);
-			}
-		}
+	bool doTrigger = false;
+	if(GetType() == MOD_TYPE_OKT)
+		doTrigger = ((chn.noteSlideParam & 0xF0) == 0x10) || m_SongFlags[SONG_FIRSTTICK];
+	else
+		doTrigger = !m_SongFlags[SONG_FIRSTTICK] && (--chn.noteSlideCounter == 0);
+
+	if(doTrigger)
+	{
+		const uint8 speed = (chn.noteSlideParam >> 4), steps = (chn.noteSlideParam & 0x0F);
+		chn.noteSlideCounter = speed;
+		// update it
+		const int32 delta = (slideUp ? steps : -steps);
+		if(chn.HasCustomTuning())
+			chn.m_PortamentoFineSteps += delta * chn.pModInstrument->pTuning->GetFineStepCount();
+		else
+			chn.nPeriod = GetPeriodFromNote(delta + GetNoteFromPeriod(chn.nPeriod, chn.nFineTune, chn.nC5Speed), chn.nFineTune, chn.nC5Speed);
+
+		if(retrig)
+			chn.position.Set(0);
 	}
 }
 
 
-std::pair<uint32, bool> CSoundFile::GetVolCmdTonePorta(const ModCommand &m, uint32 startTick) const
+std::pair<uint16, bool> CSoundFile::GetVolCmdTonePorta(const ModCommand &m, uint32 startTick) const
 {
 	if(GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT | MOD_TYPE_AMS | MOD_TYPE_DMF | MOD_TYPE_DBM | MOD_TYPE_IMF | MOD_TYPE_PSM | MOD_TYPE_J2B | MOD_TYPE_ULT | MOD_TYPE_OKT | MOD_TYPE_MT2 | MOD_TYPE_MDL))
 	{
@@ -4033,7 +3990,7 @@ std::pair<uint32, bool> CSoundFile::GetVolCmdTonePorta(const ModCommand &m, uint
 	} else
 	{
 		bool clearEffectColumn = false;
-		uint32 vol = m.vol;
+		uint16 vol = m.vol;
 		if(m.command == CMD_TONEPORTAMENTO && GetType() == MOD_TYPE_XM)
 		{
 			// Yes, FT2 is *that* weird. If there is a Mx command in the volume column
@@ -4047,15 +4004,15 @@ std::pair<uint32, bool> CSoundFile::GetVolCmdTonePorta(const ModCommand &m, uint
 		// FT2 compatibility: If there's a portamento and a note delay, execute the portamento, but don't update the parameter
 		// Test case: PortaDelay.xm
 		if(m_playBehaviour[kFT2PortaDelay] && startTick != 0)
-			return {0, clearEffectColumn};
+			return {uint16(0), clearEffectColumn};
 		else
-			return {vol * 16, clearEffectColumn};
+			return {static_cast<uint16>(vol * 16), clearEffectColumn};
 	}
 }
 
 
 // Portamento Slide
-void CSoundFile::TonePortamento(ModChannel &chn, uint32 param) const
+void CSoundFile::TonePortamento(ModChannel &chn, uint16 param) const
 {
 	chn.dwFlags.set(CHN_PORTAMENTO);
 
@@ -4066,24 +4023,23 @@ void CSoundFile::TonePortamento(ModChannel &chn, uint32 param) const
 		chn.nOldPortaUp = chn.nOldPortaDown = static_cast<uint8>(param);
 	}
 
+	if(param)
+		chn.portamentoSlide = param;
+
 	if(chn.HasCustomTuning())
 	{
 		//Behavior: Param tells number of finesteps(or 'fullsteps'(notes) with glissando)
 		//to slide per row(not per tick).
+		if(chn.portamentoSlide == 0)
+			return;
+
 		const int32 oldPortamentoTickSlide = (m_PlayState.m_nTickCount != 0) ? chn.m_PortamentoTickSlide : 0;
 
-		if(param)
-			chn.nPortamentoSlide = param;
-		else
-			if(chn.nPortamentoSlide == 0)
-				return;
+		int32 delta = chn.portamentoSlide;
+		if(chn.nPortamentoDest < 0)
+			delta = -delta;
 
-
-		if((chn.nPortamentoDest > 0 && chn.nPortamentoSlide < 0) ||
-			(chn.nPortamentoDest < 0 && chn.nPortamentoSlide > 0))
-			chn.nPortamentoSlide = -chn.nPortamentoSlide;
-
-		chn.m_PortamentoTickSlide = static_cast<int32>((m_PlayState.m_nTickCount + 1.0) * chn.nPortamentoSlide / m_PlayState.m_nMusicSpeed);
+		chn.m_PortamentoTickSlide = static_cast<int32>((m_PlayState.m_nTickCount + 1.0) * delta / m_PlayState.m_nMusicSpeed);
 
 		if(chn.dwFlags[CHN_GLISSANDO])
 		{
@@ -4115,50 +4071,33 @@ void CSoundFile::TonePortamento(ModChannel &chn, uint32 param) const
 	               || (GetType() & (MOD_TYPE_DBM | MOD_TYPE_669))
 	               || (m_PlayState.m_nMusicSpeed == 1 && m_playBehaviour[kSlidesAtSpeed1])
 	               || (GetType() == MOD_TYPE_MED && m_SongFlags[SONG_FASTVOLSLIDES]);
-	if(GetType() == MOD_TYPE_PLM && param >= 0xF0)
-	{
-		param -= 0xF0;
-		doPorta = chn.isFirstTick;
-	}
 
-	if(param)
+	int32 delta = chn.portamentoSlide;
+	if(GetType() == MOD_TYPE_PLM && delta >= 0xF0)
 	{
-		if(GetType() == MOD_TYPE_669)
-		{
-			param *= 10;
-		}
-		chn.nPortamentoSlide = param * 4;
+		delta -= 0xF0;
+		doPorta = chn.isFirstTick;
 	}
 
 	if(chn.nPeriod && chn.nPortamentoDest && doPorta)
 	{
-		if (chn.nPeriod < chn.nPortamentoDest)
+		delta *= (GetType() == MOD_TYPE_669) ? 2 : 4;
+		if(!PeriodsAreFrequencies())
+			delta = -delta;
+		if(chn.nPeriod < chn.nPortamentoDest || chn.portaTargetReached)
 		{
-			int32 delta = chn.nPortamentoSlide;
-			if(m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
-			{
-				uint32 n = chn.nPortamentoSlide / 4;
-				if (n > 255) n = 255;
-				// Return (a*b+c/2)/c - no divide error
-				// Table is 65536*2(n/192)
-				delta = Util::muldivr(chn.nPeriod, LinearSlideUpTable[n], 65536) - chn.nPeriod;
-				if (delta < 1) delta = 1;
-			}
-			chn.nPeriod += delta;
-			if (chn.nPeriod > chn.nPortamentoDest) chn.nPeriod = chn.nPortamentoDest;
-		} else
-		if (chn.nPeriod > chn.nPortamentoDest)
+			DoFreqSlide(chn, chn.nPeriod, delta, true);
+			if(chn.nPeriod > chn.nPortamentoDest)
+				chn.nPeriod = chn.nPortamentoDest;
+		} else if(chn.nPeriod > chn.nPortamentoDest)
 		{
-			int32 delta = -chn.nPortamentoSlide;
-			if(m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
-			{
-				uint32 n = chn.nPortamentoSlide / 4;
-				if (n > 255) n = 255;
-				delta = Util::muldivr(chn.nPeriod, LinearSlideDownTable[n], 65536) - chn.nPeriod;
-				if (delta > -1) delta = -1;
-			}
-			chn.nPeriod += delta;
-			if (chn.nPeriod < chn.nPortamentoDest) chn.nPeriod = chn.nPortamentoDest;
+			DoFreqSlide(chn, chn.nPeriod, -delta, true);
+			if(chn.nPeriod < chn.nPortamentoDest)
+				chn.nPeriod = chn.nPortamentoDest;
+			// FT2 compatibility: Reaching portamento target from below forces subsequent portamentos on the same note to use the logic for reaching the note from above instead.
+			// Test case: PortaResetDirection.xm
+			if(chn.nPeriod == chn.nPortamentoDest && m_playBehaviour[kFT2PortaResetDirection])
+				chn.portaTargetReached = true;
 		}
 	}
 
@@ -4252,7 +4191,7 @@ void CSoundFile::Panning(ModChannel &chn, uint32 param, PanningType panBits) con
 }
 
 
-void CSoundFile::VolumeSlide(ModChannel &chn, ModCommand::PARAM param)
+void CSoundFile::VolumeSlide(ModChannel &chn, ModCommand::PARAM param) const
 {
 	if (param)
 		chn.nOldVolumeSlide = param;
@@ -4323,7 +4262,7 @@ void CSoundFile::VolumeSlide(ModChannel &chn, ModCommand::PARAM param)
 }
 
 
-void CSoundFile::PanningSlide(ModChannel &chn, ModCommand::PARAM param, bool memory)
+void CSoundFile::PanningSlide(ModChannel &chn, ModCommand::PARAM param, bool memory) const
 {
 	if(memory)
 	{
@@ -4844,19 +4783,20 @@ void CSoundFile::InvertLoop(ModChannel &chn)
 
 // Process a MIDI Macro.
 // Parameters:
-// [in] nChn: Mod channel to apply macro on
-// [in] isSmooth: If true, internal macros are interpolated between two rows
-// [in] macro: Actual MIDI Macro string
-// [in] param: Parameter for parametric macros (Z00 - Z7F)
-// [in] plugin: Plugin to send MIDI message to (if not specified but needed, it is autodetected)
+// nChn: Mod channel to apply macro on
+// isSmooth: If true, internal macros are interpolated between two rows
+// macro: Actual MIDI Macro string
+// param: Parameter for parametric macros (Z00 - Z7F)
+// plugin: Plugin to send MIDI message to (if not specified but needed, it is autodetected)
 void CSoundFile::ProcessMIDIMacro(CHANNELINDEX nChn, bool isSmooth, const char *macro, uint8 param, PLUGINDEX plugin)
 {
 	ModChannel &chn = m_PlayState.Chn[nChn];
 	const ModInstrument *pIns = GetNumInstruments() ? chn.pModInstrument : nullptr;
 
 	uint8 out[MACRO_LENGTH];
-	uint32 outPos = 0;	// output buffer position, which also equals the number of complete bytes
-	const uint8 lastZxxParam = chn.lastZxxParam;
+	uint32 outPos = 0;  // output buffer position, which also equals the number of complete bytes
+	const uint8 lastZxxParam = chn.lastZxxParam;  // always interpolate based on original value in case z appears multiple times in macro string
+	uint8 updateZxxParam = 0xFF;                  // avoid updating lastZxxParam immediately if macro contains both internal and external MIDI message
 	bool firstNibble = true;
 
 	for(uint32 pos = 0; pos < (MACRO_LENGTH - 1) && macro[pos]; pos++)
@@ -4969,8 +4909,12 @@ void CSoundFile::ProcessMIDIMacro(CHANNELINDEX nChn, bool isSmooth, const char *
 				// Interpolation for external MIDI messages - interpolation for internal messages
 				// is handled separately to allow for more than 7-bit granularity where it's possible
 				data = static_cast<uint8>(CalculateSmoothParamChange(lastZxxParam, data));
+				chn.lastZxxParam = data;
+				updateZxxParam = 0x80;
+			} else if(updateZxxParam == 0xFF)
+			{
+				updateZxxParam = data;
 			}
-			chn.lastZxxParam = data;
 		} else if(macro[pos] == 's')
 		{
 			// SysEx Checksum (not an original Impulse Tracker macro variable, but added for convenience)
@@ -5018,6 +4962,8 @@ void CSoundFile::ProcessMIDIMacro(CHANNELINDEX nChn, bool isSmooth, const char *
 		// Finish current byte
 		outPos++;
 	}
+	if(updateZxxParam < 0x80)
+		chn.lastZxxParam = updateZxxParam;
 
 	// Macro string has been parsed and translated, now send the message(s)...
 	uint32 sendPos = 0;
@@ -5260,11 +5206,9 @@ uint32 CSoundFile::SendMIDIData(CHANNELINDEX nChn, bool isSmooth, const unsigned
 #endif // NO_PLUGINS
 
 		return macroLen;
-
 	}
 
 	return 0;
-
 }
 
 
@@ -5296,7 +5240,7 @@ void CSoundFile::ProcessSampleOffset(ModChannel& chn, CHANNELINDEX nChn, const P
 {
 	const ModCommand &m = chn.rowCommand;
 	uint32 extendedRows = 0;
-	SmpLength offset = CalculateXParam(playState.m_nPattern, playState.m_nRow, nChn, &extendedRows);
+	SmpLength offset = CalculateXParam(playState.m_nPattern, playState.m_nRow, nChn, &extendedRows), highOffset = 0;
 	if(!extendedRows)
 	{
 		// No X-param (normal behaviour)
@@ -5304,11 +5248,11 @@ void CSoundFile::ProcessSampleOffset(ModChannel& chn, CHANNELINDEX nChn, const P
 		offset <<= 8;
 		if(offset)
 			chn.oldOffset = offset;
-		else if(!isPercentageOffset)
+		else if(m.volcmd != VOLCMD_OFFSET)
 			offset = chn.oldOffset;
 
 		if(!isPercentageOffset)
-			offset += static_cast<SmpLength>(chn.nOldHiOffset) << 16;
+			highOffset = static_cast<SmpLength>(chn.nOldHiOffset) << 16;
 	}
 	if(m.volcmd == VOLCMD_OFFSET)
 	{
@@ -5316,8 +5260,9 @@ void CSoundFile::ProcessSampleOffset(ModChannel& chn, CHANNELINDEX nChn, const P
 			offset = Util::muldivr_unsigned(chn.nLength, offset, 256u << (8u * std::max(uint32(1), extendedRows)));  // o00 + Oxx = Percentage Offset
 		else if(m.vol <= std::size(ModSample().cues) && chn.pModSample != nullptr)
 			offset += chn.pModSample->cues[m.vol - 1];  // Offset relative to cue point
+		chn.oldOffset = offset;
 	}
-	SampleOffset(chn, offset);
+	SampleOffset(chn, offset + highOffset);
 }
 
 
@@ -5344,11 +5289,11 @@ void CSoundFile::SampleOffset(ModChannel &chn, SmpLength param) const
 		param /= 2u;
 	}
 
-	if(chn.rowCommand.IsNote())
+	if(chn.rowCommand.IsNote() || m_playBehaviour[kApplyOffsetWithoutNote])
 	{
 		// IT compatibility: If this note is not mapped to a sample, ignore it.
 		// Test case: empty_sample_offset.it
-		if(chn.pModInstrument != nullptr)
+		if(chn.pModInstrument != nullptr && chn.rowCommand.IsNote())
 		{
 			SAMPLEINDEX smp = chn.pModInstrument->Keyboard[chn.rowCommand.note - NOTE_MIN];
 			if(smp == 0 || smp > GetNumSamples())
@@ -5406,10 +5351,9 @@ void CSoundFile::SampleOffset(ModChannel &chn, SmpLength param) const
 }
 
 
-// 
 void CSoundFile::ReverseSampleOffset(ModChannel &chn, ModCommand::PARAM param) const
 {
-	if(chn.pModSample != nullptr)
+	if(chn.pModSample != nullptr && chn.pModSample->nLength > 0)
 	{
 		chn.dwFlags.set(CHN_PINGPONGFLAG);
 		chn.dwFlags.reset(CHN_LOOP);
@@ -5473,6 +5417,15 @@ void CSoundFile::RetrigNote(CHANNELINDEX nChn, int param, int offset)
 			if(retrigCount && !(retrigCount % retrigSpeed))
 				doRetrig = true;
 			retrigCount++;
+		} else if(GetType() == MOD_TYPE_MOD)
+		{
+			// ProTracker-style retrigger
+			// Test case: PTRetrigger.mod
+			const auto tick = m_PlayState.m_nTickCount % m_PlayState.m_nMusicSpeed;
+			if(!tick && chn.rowCommand.IsNote())
+				return;
+			if(retrigSpeed && !(tick % retrigSpeed))
+				doRetrig = true;
 		} else if(GetType() == MOD_TYPE_MTM)
 		{
 			// In MultiTracker, E9x retriggers the last note at exactly the x-th tick of the row
@@ -5525,9 +5478,9 @@ void CSoundFile::RetrigNote(CHANNELINDEX nChn, int param, int offset)
 			if(!m_playBehaviour[kFT2Retrigger] || !(chn.rowCommand.volcmd == VOLCMD_VOLUME))
 			{
 				if(retrigTable1[dv])
-					vol = (vol * retrigTable1[dv]) >> 4;
+					vol = (vol * retrigTable1[dv]) / 16;
 				else
-					vol += ((int)retrigTable2[dv]) << 2;
+					vol += ((int)retrigTable2[dv]) * 4;
 			}
 			Limit(vol, 0, 256);
 
@@ -5535,8 +5488,8 @@ void CSoundFile::RetrigNote(CHANNELINDEX nChn, int param, int offset)
 		}
 		uint32 note = chn.nNewNote;
 		int32 oldPeriod = chn.nPeriod;
-		const bool retrigAdlib = chn.dwFlags[CHN_ADLIB] && m_playBehaviour[kOPLRealRetrig];
-		if(note >= NOTE_MIN && note <= NOTE_MAX && chn.nLength && retrigAdlib)
+		// ST3 doesn't retrigger OPL notes
+		if(note >= NOTE_MIN && note <= NOTE_MAX && chn.nLength && (!chn.dwFlags[CHN_ADLIB] || GetType() != MOD_TYPE_S3M || m_playBehaviour[kOPLRealRetrig]))
 			CheckNNA(nChn, 0, note, true);
 		bool resetEnv = false;
 		if(GetType() & (MOD_TYPE_XM | MOD_TYPE_MT2))
@@ -5548,11 +5501,6 @@ void CSoundFile::RetrigNote(CHANNELINDEX nChn, int param, int offset)
 			}
 			if(param < 0x100)
 				resetEnv = true;
-		}
-		if(retrigAdlib && chn.pModSample && m_opl)
-		{
-			m_opl->NoteCut(nChn);
-			m_opl->Patch(nChn, chn.pModSample->adlib);
 		}
 
 		const bool fading = chn.dwFlags[CHN_NOTEFADE];
@@ -5583,7 +5531,7 @@ void CSoundFile::RetrigNote(CHANNELINDEX nChn, int param, int offset)
 		if(m_playBehaviour[kITRetrigger]) chn.position.Set(0);
 
 		offset--;
-		if(offset >= 0 && offset <= static_cast<int>(std::size(chn.pModSample->cues)) && chn.pModSample != nullptr)
+		if(chn.pModSample != nullptr && offset >= 0 && offset <= static_cast<int>(std::size(chn.pModSample->cues)))
 		{
 			if(offset == 0)
 				offset = chn.oldOffset;
@@ -5603,9 +5551,12 @@ void CSoundFile::RetrigNote(CHANNELINDEX nChn, int param, int offset)
 }
 
 
-void CSoundFile::DoFreqSlide(ModChannel &chn, int32 nFreqSlide) const
+// Execute a frequency slide on given channel.
+// Positive amounts increase the frequency, negative amounts decrease it.
+// The period or frequency that is read and written is in the period variable, chn.nPeriod is not touched.
+void CSoundFile::DoFreqSlide(ModChannel &chn, int32 &period, int32 amount, bool isTonePorta) const
 {
-	if(!chn.nPeriod)
+	if(!period || !amount)
 		return;
 	MPT_ASSERT(!chn.HasCustomTuning());
 
@@ -5614,34 +5565,77 @@ void CSoundFile::DoFreqSlide(ModChannel &chn, int32 nFreqSlide) const
 		// Like other oldskool trackers, Composer 669 doesn't have linear slides...
 		// But the slides are done in Hertz rather than periods, meaning that they
 		// are more effective in the lower notes (rather than the higher notes).
-		nFreqSlide *= -20;
-	}
-	if(m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
+		period += amount * 20;
+	} else if(GetType() == MOD_TYPE_FAR)
+	{
+		period += (amount * 36318 / 1024);
+	} else if(m_SongFlags[SONG_LINEARSLIDES] && GetType() != MOD_TYPE_XM)
 	{
 		// IT Linear slides
-		const auto nOldPeriod = chn.nPeriod;
-		uint32 n = std::abs(nFreqSlide) / 4u;
-		LimitMax(n, 255u);
-		if(n != 0)
+		const auto oldPeriod = period;
+		uint32 n = std::abs(amount);
+		LimitMax(n, 255u * 4u);
+
+		// Note: IT ignores the lower 2 bits when abs(mount) > 16 (it either uses the fine *or* the regular table, not both)
+		// This means that vibratos are slightly less accurate in this range than they could be.
+		// Other code paths will *either* have an amount that's a multiple of 4 *or* it's less than 16.
+		if(amount > 0)
 		{
-			chn.nPeriod = Util::muldivr(chn.nPeriod, nFreqSlide < 0 ? GetLinearSlideUpTable(this, n) : GetLinearSlideDownTable(this, n), 65536);
-			if(chn.nPeriod == nOldPeriod)
+			if(n < 16)
+				period = Util::muldivr(period, GetFineLinearSlideUpTable(this, n), 65536);
+			else
+				period = Util::muldivr(period, GetLinearSlideUpTable(this, n / 4u), 65536);
+		} else
+		{
+			if(n < 16)
+				period = Util::muldivr(period, GetFineLinearSlideDownTable(this, n), 65536);
+			else
+				period = Util::muldivr(period, GetLinearSlideDownTable(this, n / 4u), 65536);
+		}
+
+		if(period == oldPeriod)
+		{
+			const bool incPeriod = m_playBehaviour[kPeriodsAreHertz] == (amount > 0);
+			if(incPeriod && period < Util::MaxValueOfType(period))
+				period++;
+			else if(!incPeriod && period > 1)
+				period--;
+		}
+	} else if(!m_SongFlags[SONG_LINEARSLIDES] && m_playBehaviour[kPeriodsAreHertz])
+	{
+		// IT Amiga slides
+		if(amount < 0)
+		{
+			// Go down
+			period = mpt::saturate_cast<int32>(Util::mul32to64_unsigned(1712 * 8363, period) / (Util::mul32to64_unsigned(period, -amount) + 1712 * 8363));
+		} else if(amount > 0)
+		{
+			// Go up
+			const auto periodDiv = 1712 * 8363 - Util::mul32to64(period, amount);
+			if(periodDiv <= 0)
 			{
-				const bool incPeriod = m_playBehaviour[kHertzInLinearMode] == (nFreqSlide < 0);
-				if(incPeriod && chn.nPeriod < Util::MaxValueOfType(chn.nPeriod))
-					chn.nPeriod++;
-				else if(!incPeriod && chn.nPeriod > 1)
-					chn.nPeriod--;
+				if(isTonePorta)
+				{
+					period = int32_max;
+					return;
+				} else
+				{
+					period = 0;
+					chn.nFadeOutVol = 0;
+					chn.dwFlags.set(CHN_NOTEFADE | CHN_FASTVOLRAMP);
+				}
+				return;
 			}
+			period = mpt::saturate_cast<int32>(Util::mul32to64_unsigned(1712 * 8363, period) / periodDiv);
 		}
 	} else
 	{
-		chn.nPeriod += nFreqSlide;
+		period -= amount;
 	}
-	if (chn.nPeriod < 1)
+	if(period < 1)
 	{
-		chn.nPeriod = 1;
-		if(GetType() == MOD_TYPE_S3M)
+		period = 1;
+		if(GetType() == MOD_TYPE_S3M && !isTonePorta)
 		{
 			chn.nFadeOutVol = 0;
 			chn.dwFlags.set(CHN_NOTEFADE | CHN_FASTVOLRAMP);
@@ -5815,7 +5809,7 @@ void CSoundFile::SetTempo(TEMPO param, bool setFromUI)
 
 void CSoundFile::PatternLoop(PlayState &state, ModChannel &chn, ModCommand::PARAM param) const
 {
-	if(m_playBehaviour[kST3NoMutedChannels] && chn.dwFlags[CHN_MUTE])
+	if(m_playBehaviour[kST3NoMutedChannels] && chn.dwFlags[CHN_MUTE | CHN_SYNCMUTE])
 		return;  // not even effects are processed on muted S3M channels
 
 	if(!param)
@@ -5971,30 +5965,32 @@ uint32 CSoundFile::GetPeriodFromNote(uint32 note, int32 nFineTune, uint32 nC5Spe
 {
 	if (note == NOTE_NONE || (note >= NOTE_MIN_SPECIAL)) return 0;
 	note -= NOTE_MIN;
-	if (!UseFinetuneAndTranspose())
+	if(!UseFinetuneAndTranspose())
 	{
 		if(GetType() & (MOD_TYPE_MDL | MOD_TYPE_DTM))
 		{
 			// MDL uses non-linear slides, but their effectiveness does not depend on the middle-C frequency.
 			return (FreqS3MTable[note % 12u] << 4) >> (note / 12);
 		}
-		if(m_SongFlags[SONG_LINEARSLIDES] || GetType() == MOD_TYPE_669)
+		if(!nC5Speed)
+			nC5Speed = 8363;
+		if(PeriodsAreFrequencies())
 		{
-			// In IT linear slide mode, directly use frequency in Hertz rather than periods.
-			if(m_playBehaviour[kHertzInLinearMode] || GetType() == MOD_TYPE_669)
-				return Util::muldiv_unsigned(nC5Speed, LinearSlideUpTable[(note % 12u) * 16u] << (note / 12u), 65536 << 5);
-			else
-				return (FreqS3MTable[note % 12u] << 5) >> (note / 12);
+			// Compute everything in Hertz rather than periods.
+			uint32 freq = Util::muldiv_unsigned(nC5Speed, LinearSlideUpTable[(note % 12u) * 16u] << (note / 12u), 65536 << 5);
+			LimitMax(freq, static_cast<uint32>(int32_max));
+			return freq;
+		} else if(m_SongFlags[SONG_LINEARSLIDES])
+		{
+			return (FreqS3MTable[note % 12u] << 5) >> (note / 12);
 		} else
 		{
-			if (!nC5Speed)
-				nC5Speed = 8363;
 			LimitMax(nC5Speed, uint32_max >> (note / 12u));
 			//(a*b)/c
 			return Util::muldiv_unsigned(8363, (FreqS3MTable[note % 12u] << 5), nC5Speed << (note / 12u));
 			//8363 * freq[note%12] / nC5Speed * 2^(5-note/12)
 		}
-	} else if (GetType() & (MOD_TYPE_XM | MOD_TYPE_MTM))
+	} else if(GetType() & (MOD_TYPE_XM | MOD_TYPE_MTM))
 	{
 		if (note < 12) note = 12;
 		note -= 12;
@@ -6083,7 +6079,7 @@ uint32 CSoundFile::GetFreqFromPeriod(uint32 period, uint32 c5speed, int32 nPerio
 			if(!period) period = 1;
 			return ((8363 * 1712L) << FREQ_FRACBITS) / period;
 		}
-	} else if (UseFinetuneAndTranspose())
+	} else if(UseFinetuneAndTranspose())
 	{
 		return ((3546895L * 4) << FREQ_FRACBITS) / period;
 	} else if(GetType() == MOD_TYPE_669)
@@ -6098,18 +6094,16 @@ uint32 CSoundFile::GetFreqFromPeriod(uint32 period, uint32 c5speed, int32 nPerio
 	} else
 	{
 		LimitMax(period, Util::MaxValueOfType(period) >> 8);
-		if(m_SongFlags[SONG_LINEARSLIDES])
+		if(PeriodsAreFrequencies())
 		{
-			if(m_playBehaviour[kHertzInLinearMode])
-			{
-				// IT linear slides already use frequencies instead of periods.
-				static_assert(FREQ_FRACBITS <= 8, "Check this shift operator");
-				return uint32(((uint64(period) << 8) + nPeriodFrac) >> (8 - FREQ_FRACBITS));
-			} else
-			{
-				if (!c5speed) c5speed = 8363;
-				return Util::muldiv_unsigned(c5speed, (1712L << 8) << FREQ_FRACBITS, (period << 8) + nPeriodFrac);
-			}
+			// Input is already a frequency in Hertz, not a period.
+			static_assert(FREQ_FRACBITS <= 8, "Check this shift operator");
+			return uint32(((uint64(period) << 8) + nPeriodFrac) >> (8 - FREQ_FRACBITS));
+		} else if(m_SongFlags[SONG_LINEARSLIDES])
+		{
+			if(!c5speed)
+				c5speed = 8363;
+			return Util::muldiv_unsigned(c5speed, (1712L << 8) << FREQ_FRACBITS, (period << 8) + nPeriodFrac);
 		} else
 		{
 			return Util::muldiv_unsigned(8363, (1712L << 8) << FREQ_FRACBITS, (period << 8) + nPeriodFrac);

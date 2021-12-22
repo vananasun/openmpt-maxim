@@ -11,11 +11,11 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 
 #include "../common/misc_util.h"
-#include "../common/mptMutex.h"
+#include "mpt/mutex/mutex.hpp"
 
 #include <map>
 #include <set>
@@ -657,7 +657,7 @@ public:
 	}
 	bool IsDefault() const
 	{
-		conf.IsDefault(path);
+		return conf.IsDefault(path);
 	}
 	CachedSetting & Update()
 	{

@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 #include "resource.h"  // main symbols
 #include "Settings.h"
@@ -19,7 +19,7 @@
 #include "../soundlib/MIDIMacros.h"
 #include "../soundlib/modcommand.h"
 #include "../common/ComponentManager.h"
-#include "../common/mptMutex.h"
+#include "../misc/mptMutex.h"
 #include "../common/mptRandom.h"
 #ifdef MPT_WITH_APC
 #include "APC/APC40.h"
@@ -34,6 +34,7 @@ namespace SoundDevice
 {
 class Manager;
 }  // namespace SoundDevice
+struct AllSoundDeviceComponents;
 class CDLSBank;
 class DebugSettings;
 class TrackerSettings;
@@ -142,7 +143,9 @@ protected:
 	IniFileSettingsContainer *m_pPluginCache = nullptr;
 	CModDocTemplate *m_pModTemplate = nullptr;
 	CVstPluginManager *m_pPluginManager = nullptr;
-	SoundDevice::Manager *m_pSoundDevicesManager = nullptr;
+	mpt::log::GlobalLogger m_GlobalLogger{};
+	std::unique_ptr<AllSoundDeviceComponents> m_pAllSoundDeviceComponents;
+	std::unique_ptr<SoundDevice::Manager> m_pSoundDevicesManager;
 
 	mpt::PathString m_InstallPath;         // i.e. "C:\Program Files\OpenMPT\" (installer mode) or "G:\OpenMPT\" (portable mode)
 	mpt::PathString m_InstallBinPath;      // i.e. "C:\Program Files\OpenMPT\bin\" (multi-arch mode) or InstallPath (legacy mode)
@@ -166,6 +169,7 @@ protected:
 public:
 	CTrackApp();
 
+	CDataRecoveryHandler *GetDataRecoveryHandler() override;
 	void AddToRecentFileList(LPCTSTR lpszPathName) override;
 	void AddToRecentFileList(const mpt::PathString &path);
 	/// Removes item from MRU-list; most recent item has index zero.
@@ -212,7 +216,7 @@ public:
 	mpt::thread_safe_prng<mpt::default_prng> &PRNG() { return *m_PRNG; }
 	CModDocTemplate *GetModDocTemplate() const { return m_pModTemplate; }
 	CVstPluginManager *GetPluginManager() const { return m_pPluginManager; }
-	SoundDevice::Manager *GetSoundDevicesManager() const { return m_pSoundDevicesManager; }
+	SoundDevice::Manager *GetSoundDevicesManager() const { return m_pSoundDevicesManager.get(); }
 	void GetDefaultMidiMacro(MIDIMacroConfig &cfg) const { cfg = m_MidiCfg; }
 	void SetDefaultMidiMacro(const MIDIMacroConfig &cfg) { m_MidiCfg = cfg; }
 	mpt::PathString GetConfigFileName() const { return m_szConfigFileName; }

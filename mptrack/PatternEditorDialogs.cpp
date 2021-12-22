@@ -231,8 +231,8 @@ void CPatternPropertiesDlg::OnTempoSwing()
 	const ROWINDEX oldRPM = pat.GetRowsPerMeasure();
 
 	// Temporarily apply new tempo signature for preview
-	ROWINDEX newRPB = std::max(1u, GetDlgItemInt(IDC_ROWSPERBEAT));
-	ROWINDEX newRPM = std::max(newRPB, GetDlgItemInt(IDC_ROWSPERMEASURE));
+	const ROWINDEX newRPB = std::clamp(static_cast<ROWINDEX>(GetDlgItemInt(IDC_ROWSPERBEAT)), ROWINDEX(1), MAX_ROWS_PER_BEAT);
+	const ROWINDEX newRPM = std::clamp(static_cast<ROWINDEX>(GetDlgItemInt(IDC_ROWSPERMEASURE)), newRPB, MAX_ROWS_PER_BEAT);
 	pat.SetSignature(newRPB, newRPM);
 
 	m_tempoSwing.resize(newRPB, TempoSwing::Unity);
@@ -255,16 +255,18 @@ void CPatternPropertiesDlg::OnOK()
 		if(IsDlgButtonChecked(IDC_CHECK1))
 		{
 			// Enable signature
-			ROWINDEX nNewBeat = (ROWINDEX)GetDlgItemInt(IDC_ROWSPERBEAT, NULL, FALSE), nNewMeasure = (ROWINDEX)GetDlgItemInt(IDC_ROWSPERMEASURE, NULL, FALSE);
-			if(nNewBeat != pattern.GetRowsPerBeat() || nNewMeasure != pattern.GetRowsPerMeasure() || m_tempoSwing != pattern.GetTempoSwing())
+			const ROWINDEX newRPB = std::min(static_cast<ROWINDEX>(GetDlgItemInt(IDC_ROWSPERBEAT, NULL, FALSE)), MAX_ROWS_PER_BEAT);
+			const ROWINDEX newRPM = std::min(static_cast<ROWINDEX>(GetDlgItemInt(IDC_ROWSPERMEASURE, NULL, FALSE)), MAX_ROWS_PER_BEAT);
+
+			if(newRPB != pattern.GetRowsPerBeat() || newRPM != pattern.GetRowsPerMeasure() || m_tempoSwing != pattern.GetTempoSwing())
 			{
-				if(!pattern.SetSignature(nNewBeat, nNewMeasure))
+				if(!pattern.SetSignature(newRPB, newRPM))
 				{
 					Reporting::Error("Invalid time signature!", "Pattern Properties");
 					GetDlgItem(IDC_ROWSPERBEAT)->SetFocus();
 					return;
 				}
-				m_tempoSwing.resize(nNewBeat, TempoSwing::Unity);
+				m_tempoSwing.resize(newRPB, TempoSwing::Unity);
 				pattern.SetTempoSwing(m_tempoSwing);
 				modDoc.SetModified();
 			}
@@ -294,7 +296,7 @@ void CPatternPropertiesDlg::OnOK()
 		{
 			if(!sndFile.Patterns[m_nPattern].IsEmptyRow(row))
 			{
-				resize = (Reporting::Confirm(MPT_FORMAT("Data at the {} of the pattern will be lost.\nDo you want to continue?")(resizeAtEnd ? "end" : "start"), "Shrink Pattern") == cnfYes);
+				resize = (Reporting::Confirm(MPT_AFORMAT("Data at the {} of the pattern will be lost.\nDo you want to continue?")(resizeAtEnd ? "end" : "start"), "Shrink Pattern") == cnfYes);
 				break;
 			}
 		}
@@ -1316,7 +1318,7 @@ void QuickChannelProperties::Show(CModDoc *modDoc, CHANNELINDEX chn, CPoint posi
 	    Clamp(static_cast<int>(position.y) - rect.Height() / 2, 0, static_cast<int>(screenRect.bottom) - rect.Height()));
 	MoveWindow(rect);
 
-	SetWindowText(MPT_TFORMAT("Settings for Channel {}")(chn).c_str());
+	SetWindowText(MPT_TFORMAT("Settings for Channel {}")(chn + 1).c_str());
 
 	UpdateDisplay();
 
@@ -1521,7 +1523,8 @@ void QuickChannelProperties::OnChangeColor()
 	{
 		PrepareUndo();
 		m_document->GetSoundFile().ChnSettings[m_channel].color = *color;
-		m_document->SetModified();
+		if(m_document->SupportsChannelColors())
+			m_document->SetModified();
 		m_document->UpdateAllViews(nullptr, GeneralHint(m_channel).Channels(), this);
 	}
 	m_settingColor = false;
@@ -1550,7 +1553,8 @@ void QuickChannelProperties::PickColorFromChannel(CHANNELINDEX channel)
 		PrepareUndo();
 		channels[m_channel].color = channels[channel].color;
 		m_colorBtn.SetColor(channels[m_channel].color);
-		m_document->SetModified();
+		if(m_document->SupportsChannelColors())
+			m_document->SetModified();
 		m_document->UpdateAllViews(nullptr, GeneralHint(m_channel).Channels(), this);
 	}
 }

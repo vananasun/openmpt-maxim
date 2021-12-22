@@ -12,6 +12,7 @@
 #include "Sndfile.h"
 #include "ModSample.h"
 #include "modsmp_ctrl.h"
+#include "mpt/base/numbers.hpp"
 
 #include <cmath>
 
@@ -215,7 +216,7 @@ void *ModSample::AllocateSample(SmpLength numFrames, size_t bytesPerSample)
 		if(p != nullptr)
 		{
 			memset(p, 0, allocSize);
-			return p + (InterpolationMaxLookahead * MaxSamplingPointSize);
+			return p + (InterpolationLookaheadBufferSize * MaxSamplingPointSize);
 		}
 	}
 	return nullptr;
@@ -233,7 +234,7 @@ size_t ModSample::GetRealSampleBufferSize(SmpLength numSamples, size_t bytesPerS
 	// * 4x InterpolationMaxLookahead for the sustain loop (same as the two points above)
 
 	const SmpLength maxSize = Util::MaxValueOfType(numSamples);
-	const SmpLength lookaheadBufferSize = (MaxSamplingPointSize + 1 + 4 + 4) * InterpolationMaxLookahead;
+	const SmpLength lookaheadBufferSize = (MaxSamplingPointSize + 1 + 4 + 4) * InterpolationLookaheadBufferSize;
 
 	if(numSamples == 0 || numSamples > MAX_SAMPLE_LENGTH || lookaheadBufferSize > maxSize - numSamples)
 	{
@@ -261,7 +262,7 @@ void ModSample::FreeSample(void *samplePtr)
 {
 	if(samplePtr)
 	{
-		delete[](((char *)samplePtr) - (InterpolationMaxLookahead * MaxSamplingPointSize));
+		delete[](((char *)samplePtr) - (InterpolationLookaheadBufferSize * MaxSamplingPointSize));
 	}
 }
 
@@ -332,8 +333,8 @@ public:
 	void CopyLoop(bool direction) const
 	{
 		// Direction: true = start reading and writing forward, false = start reading and writing backward (write direction never changes)
-		const int numSamples = 2 * InterpolationMaxLookahead + (direction ? 1 : 0);  // Loop point is included in forward loop expansion
-		T *dest = target + numChannels * (2 * InterpolationMaxLookahead - 1);        // Write buffer offset
+		const int numSamples = 2 * InterpolationLookaheadBufferSize + (direction ? 1 : 0);  // Loop point is included in forward loop expansion
+		T *dest = target + numChannels * (2 * InterpolationLookaheadBufferSize - 1);        // Write buffer offset
 		SmpLength readPosition = loopEnd - 1;
 		const int writeIncrement = direction ? 1 : -1;
 		int readIncrement = writeIncrement;
@@ -384,7 +385,7 @@ template <typename T>
 void PrecomputeLoopsImpl(ModSample &smp, const CSoundFile &sndFile)
 {
 	const int numChannels = smp.GetNumChannels();
-	const int copySamples = numChannels * InterpolationMaxLookahead;
+	const int copySamples = numChannels * InterpolationLookaheadBufferSize;
 
 	T *sampleData = static_cast<T *>(smp.samplev());
 	T *afterSampleStart = sampleData + smp.nLength * numChannels;
@@ -393,7 +394,7 @@ void PrecomputeLoopsImpl(ModSample &smp, const CSoundFile &sndFile)
 
 	// Hold sample on the same level as the last sampling point at the end to prevent extra pops with interpolation.
 	// Do the same at the sample start, too.
-	for(int i = 0; i < (int)InterpolationMaxLookahead; i++)
+	for(int i = 0; i < (int)InterpolationLookaheadBufferSize; i++)
 	{
 		for(int c = 0; c < numChannels; c++)
 		{
@@ -478,22 +479,21 @@ void ModSample::TransposeToFrequency()
 }
 
 
-// Return tranpose.finetune as 25.7 fixed point value.
-int32 ModSample::FrequencyToTranspose(uint32 freq)
+// Return a pair of {transpose, finetune}
+std::pair<int8, int8> ModSample::FrequencyToTranspose(uint32 freq)
 {
 	if(!freq)
-		return 0;
-	else
-		return mpt::saturate_round<int32>(std::log(freq * (1.0 / 8363.0)) * (12.0 * 128.0 * (1.0 / M_LN2)));
+		return {};
+
+	const auto f2t = mpt::saturate_round<int32>(std::log(freq * (1.0 / 8363.0)) * (12.0 * 128.0 * (1.0 / mpt::numbers::ln2)));
+	const auto fine = std::div(Clamp(f2t, -16384, 16383), int32(128));
+	return {static_cast<int8>(fine.quot), static_cast<int8>(fine.rem)};
 }
 
 
 void ModSample::FrequencyToTranspose()
 {
-	const int f2t = Clamp(FrequencyToTranspose(nC5Speed), -16384, 16383);
-	const auto fine = std::div(f2t, 128);
-	RelativeTone = static_cast<int8>(fine.quot);
-	nFineTune = static_cast<int8>(fine.rem);
+	std::tie(RelativeTone, nFineTune) = FrequencyToTranspose(nC5Speed);
 }
 
 
@@ -527,6 +527,17 @@ void ModSample::SetDefaultCuePoints()
 		cues[i] = (i + 1) << 11;
 	}
 }
+
+
+void ModSample::Set16BitCuePoints()
+{
+	// Cue points that are useful for extending regular offset command
+	for(int i = 0; i < 9; i++)
+	{
+		cues[i] = (i + 1) << 16;
+	}
+}
+
 
 void ModSample::SetAdlib(bool enable, OPLPatch patch)
 {

@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 #include "Snd_defs.h"
 #include "../common/misc_util.h"
@@ -53,7 +53,7 @@ enum VolumeCommand : uint8
 	VOLCMD_TONEPORTAMENTO = 11,
 	VOLCMD_PORTAUP        = 12,
 	VOLCMD_PORTADOWN      = 13,
-	VOLCMD_DELAYCUT       = 14, //currently unused
+	VOLCMD_PLAYCONTROL    = 14,
 	VOLCMD_OFFSET         = 15,
 	MAX_VOLCMDS
 };
@@ -177,16 +177,21 @@ public:
 	static bool IsPcNote(NOTE note) { return note == NOTE_PC || note == NOTE_PCS; }
 
 	// Returns true if and only if note is a valid musical note.
-	bool IsNote() const { return IsInRange(note, NOTE_MIN, NOTE_MAX); }
-	static bool IsNote(NOTE note) { return IsInRange(note, NOTE_MIN, NOTE_MAX); }
+	bool IsNote() const { return mpt::is_in_range(note, NOTE_MIN, NOTE_MAX); }
+	static bool IsNote(NOTE note) { return mpt::is_in_range(note, NOTE_MIN, NOTE_MAX); }
 	// Returns true if and only if note is a valid special note.
-	bool IsSpecialNote() const { return IsInRange(note, NOTE_MIN_SPECIAL, NOTE_MAX_SPECIAL); }
-	static bool IsSpecialNote(NOTE note) { return IsInRange(note, NOTE_MIN_SPECIAL, NOTE_MAX_SPECIAL); }
+	bool IsSpecialNote() const { return mpt::is_in_range(note, NOTE_MIN_SPECIAL, NOTE_MAX_SPECIAL); }
+	static bool IsSpecialNote(NOTE note) { return mpt::is_in_range(note, NOTE_MIN_SPECIAL, NOTE_MAX_SPECIAL); }
 	// Returns true if and only if note is a valid musical note or the note entry is empty.
 	bool IsNoteOrEmpty() const { return note == NOTE_NONE || IsNote(); }
 	static bool IsNoteOrEmpty(NOTE note) { return note == NOTE_NONE || IsNote(note); }
 	// Returns true if any of the commands in this cell trigger a tone portamento.
 	bool IsPortamento() const { return command == CMD_TONEPORTAMENTO || command == CMD_TONEPORTAVOL || volcmd == VOLCMD_TONEPORTAMENTO; }
+	// Returns true if the cell contains a sliding or otherwise continuous effect command.
+	bool IsContinousCommand(const CSoundFile &sndFile) const;
+	bool IsContinousVolColCommand() const;
+	// Returns true if the cell contains a sliding command with separate up/down nibbles.
+	bool IsSlideUpDownCommand() const;
 	// Returns true if the cell contains an effect command that may affect the global state of the module.
 	bool IsGlobalCommand() const { return IsGlobalCommand(command, param); }
 	static bool IsGlobalCommand(COMMAND command, PARAM param);

@@ -14,6 +14,8 @@
 #include "mod_specifications.h"
 #include "../common/version.h"
 #include "../common/serialization_utils.h"
+#include "mpt/io/io.hpp"
+#include "mpt/io/io_stdstream.hpp"
 
 OPENMPT_NAMESPACE_BEGIN
 
@@ -200,6 +202,14 @@ bool ModSequence::IsValidPat(ORDERINDEX ord) const
 	if(ord < size())
 		return m_sndFile.Patterns.IsValidPat(at(ord));
 	return false;
+}
+
+
+CPattern *ModSequence::PatternAt(ORDERINDEX ord) const
+{
+	if(!IsValidPat(ord))
+		return nullptr;
+	return &m_sndFile.Patterns[at(ord)];
 }
 
 

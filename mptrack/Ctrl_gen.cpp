@@ -182,7 +182,8 @@ int CCtrlGeneral::TempoToSlider(TEMPO tempo) const
 	{
 		if(tempo >= TEMPO_SPLIT_THRESHOLD)
 			tempo = TEMPO((tempo - TEMPO_SPLIT_THRESHOLD).GetInt() / TEMPO_SPLIT_PRECISION + TEMPO_SPLIT_THRESHOLD.GetInt(), 0);
-		return (TempoSliderRange() - tempo).GetInt();
+		const auto range = TempoSliderRange();
+		return (range - std::min(tempo, range)).GetInt();
 	}
 }
 
@@ -289,7 +290,6 @@ void CCtrlGeneral::UpdateView(UpdateHint hint, CObject *pHint)
 		m_EditTempo.AllowFractions(specs.hasFractionalTempo);
 
 		const BOOL bIsNotMOD = (m_sndFile.GetType() != MOD_TYPE_MOD);
-		const BOOL bIsNotMOD_S3M = ((bIsNotMOD) && (m_sndFile.GetType() != MOD_TYPE_S3M));
 		const BOOL bIsNotMOD_XM = ((bIsNotMOD) && (m_sndFile.GetType() != MOD_TYPE_XM));
 		m_EditArtist.EnableWindow(specs.hasArtistName);
 		m_EditTempo.EnableWindow(bIsNotMOD);
@@ -304,7 +304,6 @@ void CCtrlGeneral::UpdateView(UpdateHint hint, CObject *pHint)
 		m_SpinGlobalVol.EnableWindow(globalVol);
 		m_EditSamplePA.EnableWindow(bIsNotMOD);
 		m_SpinSamplePA.EnableWindow(bIsNotMOD);
-		//m_SliderSamplePreAmp.EnableWindow(bIsNotMOD);
 		m_SliderVSTiVol.EnableWindow(bIsNotMOD);
 		m_EditVSTiVol.EnableWindow(bIsNotMOD);
 		m_SpinVSTiVol.EnableWindow(bIsNotMOD);
@@ -312,7 +311,7 @@ void CCtrlGeneral::UpdateView(UpdateHint hint, CObject *pHint)
 		m_SpinRestartPos.EnableWindow(m_EditRestartPos.IsWindowEnabled());
 
 		//Note: Sample volume slider is not disabled for MOD
-		//on purpose(can be used to control play volume)
+		//on purpose (can be used to control play volume)
 	}
 
 	if(updateAll || (hint.GetCategory() == HINTCAT_GLOBAL && hintType[HINT_MODCHANNELS]))
@@ -322,7 +321,7 @@ void CCtrlGeneral::UpdateView(UpdateHint hint, CObject *pHint)
 		switch(m_sndFile.GetType())
 		{
 		case MOD_TYPE_MOD:	modType = U_("MOD (ProTracker)"); break;
-		case MOD_TYPE_S3M:	modType = U_("S3M (ScreamTracker)"); break;
+		case MOD_TYPE_S3M:	modType = U_("S3M (Scream Tracker)"); break;
 		case MOD_TYPE_XM:	modType = U_("XM (FastTracker 2)"); break;
 		case MOD_TYPE_IT:	modType = U_("IT (Impulse Tracker)"); break;
 		case MOD_TYPE_MPT:	modType = U_("MPTM (OpenMPT)"); break;

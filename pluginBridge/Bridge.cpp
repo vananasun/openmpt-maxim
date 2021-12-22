@@ -10,7 +10,7 @@
 
 // TODO: Translate pointer-sized members in remaining structs: VstVariableIo, VstOfflineTask, VstAudioFile, VstWindow (all these are currently not supported by OpenMPT, so not urgent at all)
 
-#include "../common/BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 #include "../common/mptBaseMacros.h"
 #include "../common/mptBaseTypes.h"
 #include "../common/mptBaseUtils.h"
@@ -96,7 +96,7 @@ int _tmain(int argc, TCHAR *argv[])
 }
 
 
-int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, LPSTR /*lpCmdLine*/, int /*nCmdShow*/)
+int WINAPI WinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevInstance*/, _In_ LPSTR /*lpCmdLine*/, _In_ int /*nCmdShow*/)
 {
 	int argc = 0;
 	auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);

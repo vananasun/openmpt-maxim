@@ -7,11 +7,12 @@
  * @brief Real-valued FFT transform class.
  *
  * This file includes FFT object implementation. All created FFT objects are
- * kept in a global list after use for future reusal. Such approach minimizes
- * time necessary to initialize the FFT object of the required length.
+ * kept in a global list after use, for a future reusal. Such approach
+ * minimizes time necessary to initialize the FFT object of the required
+ * length.
  *
- * r8brain-free-src Copyright (c) 2013-2019 Aleksey Vaneev
- * See the "License.txt" file for license.
+ * r8brain-free-src Copyright (c) 2013-2021 Aleksey Vaneev
+ * See the "LICENSE" file for license.
  */
 
 #ifndef R8B_CDSPREALFFT_INCLUDED
@@ -19,9 +20,17 @@
 
 #include "r8bbase.h"
 
-#if !R8B_IPP && !R8B_PFFFT
+#if !R8B_IPP && !R8B_PFFFT && !R8B_PFFFT_DOUBLE
 	#include "fft4g.h"
-#endif // !R8B_IPP && !R8B_PFFFT
+#endif // !R8B_IPP && !R8B_PFFFT && !R8B_PFFFT_DOUBLE
+
+#if R8B_PFFFT
+	#include "pffft.h"
+#endif // R8B_PFFFT
+
+#if R8B_PFFFT_DOUBLE
+	#include "pffft_double/pffft_double.h"
+#endif // R8B_PFFFT_DOUBLE
 
 namespace r8b {
 
@@ -35,8 +44,8 @@ namespace r8b {
  * Uses functions from the FFT package by: Copyright(C) 1996-2001 Takuya OOURA
  * http://www.kurims.kyoto-u.ac.jp/~ooura/fft.html
  *
- * Also uses Intel IPP library functions if available (the R8B_IPP=1 macro was
- * defined). Note that IPP library's FFT functions are 2-3 times more
+ * Also uses Intel IPP library functions if available (if the R8B_IPP=1 macro
+ * was defined). Note that IPP library's FFT functions are 2-3 times more
  * efficient on the modern Intel Core i7-3770K processor than Ooura's
  * functions. It may be worthwhile investing in IPP. Note, that FFT functions
  * take less than 20% of the overall sample rate conversion time. However,
@@ -110,7 +119,11 @@ public:
 
 		pffft_transform_ordered( setup, op, op, work, PFFFT_FORWARD );
 
-	#else // R8B_PFFFT
+	#elif R8B_PFFFT_DOUBLE
+
+		pffftd_transform_ordered( setup, p, p, work, PFFFT_FORWARD );
+
+	#else // R8B_PFFFT_DOUBLE
 
 		ooura_fft :: rdft( Len, 1, p, wi.getPtr(), wd.getPtr() );
 
@@ -135,7 +148,11 @@ public:
 		pffft_transform_ordered( setup, (float*) p, (float*) p, work,
 			PFFFT_BACKWARD );
 
-	#else // R8B_PFFFT
+	#elif R8B_PFFFT_DOUBLE
+
+		pffftd_transform_ordered( setup, p, p, work, PFFFT_BACKWARD );
+
+	#else // R8B_PFFFT_DOUBLE
 
 		ooura_fft :: rdft( Len, -1, p, wi.getPtr(), wd.getPtr() );
 
@@ -259,11 +276,11 @@ public:
 	 * object.
 	 *
 	 * @param aip Input data block 1, "zero-phase" response. This block should
-	 * be first transformed via the convertToZ() function.
+	 * be first transformed via the convertToZP() function.
 	 * @param[in,out] aop Output/input data block 2.
 	 */
 
-	void multiplyBlocksZ( const double* const aip, double* const aop ) const
+	void multiplyBlocksZP( const double* const aip, double* const aop ) const
 	{
 	#if R8B_FLOATFFT
 
@@ -300,7 +317,7 @@ public:
 	 * @param[in,out] ap Block to transform.
 	 */
 
-	void convertToZ( double* const ap ) const
+	void convertToZP( double* const ap ) const
 	{
 	#if R8B_FLOATFFT
 
@@ -344,7 +361,12 @@ private:
 			///<
 		CFixedBuffer< float > work; ///< Working buffer.
 			///<
-	#else // R8B_PFFFT
+	#elif R8B_PFFFT_DOUBLE
+		PFFFTD_Setup* setup; ///< PFFFTD setup object.
+			///<
+		CFixedBuffer< double > work; ///< Working buffer.
+			///<
+	#else // R8B_PFFFT_DOUBLE
 		CFixedBuffer< int > wi; ///< Working buffer (ints).
 			///<
 		CFixedBuffer< double > wd; ///< Working buffer (doubles).
@@ -406,7 +428,9 @@ private:
 		, InvMulConst( 1.0 / Len )
 	#elif R8B_PFFFT
 		, InvMulConst( 1.0 / Len )
-	#else // R8B_PFFFT
+	#elif R8B_PFFFT_DOUBLE
+		, InvMulConst( 1.0 / Len )
+	#else // R8B_PFFFT_DOUBLE
 		, InvMulConst( 2.0 / Len )
 	#endif // R8B_IPP
 	{
@@ -431,7 +455,12 @@ private:
 		setup = pffft_new_setup( Len, PFFFT_REAL );
 		work.alloc( Len );
 
-	#else // R8B_PFFFT
+	#elif R8B_PFFFT_DOUBLE
+
+		setup = pffftd_new_setup( Len, PFFFT_REAL );
+		work.alloc( Len );
+
+	#else // R8B_PFFFT_DOUBLE
 
 		wi.alloc( (int) ceil( 2.0 + sqrt( (double) ( Len >> 1 ))));
 		wi[ 0 ] = 0;
@@ -444,7 +473,9 @@ private:
 	{
 		#if R8B_PFFFT
 			pffft_destroy_setup( setup );
-		#endif // R8B_PFFFT
+		#elif R8B_PFFFT_DOUBLE
+			pffftd_destroy_setup( setup );
+		#endif // R8B_PFFFT_DOUBLE
 
 		delete Next;
 	}

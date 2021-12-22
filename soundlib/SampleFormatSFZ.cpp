@@ -17,6 +17,7 @@
 #include "../common/mptFileIO.h"
 #endif // !MODPLUG_NO_FILESAVE
 #include "modsmp_ctrl.h"
+#include "mpt/base/numbers.hpp"
 
 #include <functional>
 
@@ -28,6 +29,12 @@ template<size_t N>
 static bool SFZStartsWith(const std::string_view &l, const char(&r)[N])
 {
 	return l.substr(0, N - 1) == r;
+}
+
+template <size_t N>
+static bool SFZEndsWith(const std::string_view &l, const char (&r)[N])
+{
+	return l.size() >= (N - 1) && l.substr(l.size() - (N - 1), N - 1) == r;
 }
 
 static bool SFZIsNumeric(const std::string_view &str)
@@ -243,7 +250,7 @@ struct SFZEnvelope
 		auto &env = eg.points;
 		if(attack > 0 || delay > 0)
 		{
-			env.push_back({0, startLevel});
+			env.push_back({0.0, startLevel});
 			if(delay > 0)
 				env.push_back({delay, env.back().second});
 			env.push_back({attack, 100.0});
@@ -251,11 +258,11 @@ struct SFZEnvelope
 		if(hold > 0)
 		{
 			if(env.empty())
-				env.push_back({0, 100.0});
+				env.push_back({0.0, 100.0});
 			env.push_back({hold, env.back().second});
 		}
 		if(env.empty())
-			env.push_back({0, 100.0});
+			env.push_back({0.0, 100.0});
 		if(env.back().second != sustainLevel)
 			env.push_back({decay, sustainLevel});
 		if(sustainLevel != 0)
@@ -685,7 +692,8 @@ bool CSoundFile::ReadSFZInstrument(INSTRUMENTINDEX nInstr, FileReader &file)
 					break;
 				}
 				const std::string key = mpt::ToLowerCaseAscii(s.substr(0, keyEnd));
-				if(key == "sample" || key == "default_path" || SFZStartsWith(key, "label_cc") || SFZStartsWith(key, "label_key") || SFZStartsWith(key, "region_label"))
+				// Currently defined *_label opcodes are global_label, group_label, master_label, region_label, sw_label
+				if(key == "sample" || key == "default_path" || SFZStartsWith(key, "label_cc") || SFZStartsWith(key, "label_key") || SFZEndsWith(key, "_label"))
 				{
 					// Sample / CC name may contain spaces...
 					charsRead = s.find_first_of("=\t<", valueStart);
@@ -768,7 +776,7 @@ bool CSoundFile::ReadSFZInstrument(INSTRUMENTINDEX nInstr, FileReader &file)
 			sample.uFlags.set(CHN_16BIT);
 			std::function<uint16(int32)> generator;
 			if(synthSample == "*sine")
-				generator = [](int32 i) { return mpt::saturate_round<int16>(std::sin(i * 2.0 * M_PI / 256.0) * int16_max); };
+				generator = [](int32 i) { return mpt::saturate_round<int16>(std::sin(i * ((2.0 * mpt::numbers::pi) / 256.0)) * int16_max); };
 			else if(synthSample == "*square")
 				generator = [](int32 i) { return i < 128 ? int16_max : int16_min; };
 			else if(synthSample == "*triangle" || synthSample == "*tri")
@@ -808,6 +816,7 @@ bool CSoundFile::ReadSFZInstrument(INSTRUMENTINDEX nInstr, FileReader &file)
 			{
 				filename = file.GetOptionalFileName().value_or(P_("")).GetPath() + filename;
 			}
+			filename = filename.Simplify();
 			SetSamplePath(smp, filename);
 			InputFile f(filename, SettingCacheCompleteFileBeforeLoading());
 			FileReader smpFile = GetFileReader(f);
@@ -1023,7 +1032,7 @@ static void WriteSFZEnvelope(std::ostream &f, double tickDuration, int index, co
 
 	const bool sustainAtEnd = (!env.dwFlags[ENV_SUSTAIN] || env.nSustainStart == (env.size() - 1)) && convFunc(env.back().value) != 0.0;
 
-	const auto prefix = MPT_FORMAT("\neg{}_")(mpt::fmt::dec0<2>(index));
+	const auto prefix = MPT_AFORMAT("\neg{}_")(mpt::afmt::dec0<2>(index));
 	f << "\n" << prefix << type << "=" << scale;
 	f << prefix << "points=" << (env.size() + (sustainAtEnd ? 1 : 0));
 	EnvelopeNode::tick_t lastTick = 0;
@@ -1066,7 +1075,7 @@ bool CSoundFile::SaveSFZInstrument(INSTRUMENTINDEX nInstr, std::ostream &f, cons
 
 	// Creating directory names with trailing spaces or dots is a bad idea, as they are difficult to remove in Windows.
 	const mpt::RawPathString whitespaceDirName = PL_(" \n\r\t.");
-	const mpt::PathString sampleBaseName = mpt::PathString::FromNative(mpt::String::Trim(filename.GetFileName().AsNative(), whitespaceDirName));
+	const mpt::PathString sampleBaseName = mpt::PathString::FromNative(mpt::trim(filename.GetFileName().AsNative(), whitespaceDirName));
 	const mpt::PathString sampleDirName = (sampleBaseName.empty() ? P_("Samples") : sampleBaseName)  + P_("/");
 	const mpt::PathString sampleBasePath = filename.GetPath() + sampleDirName;
 	if(!sampleBasePath.IsDirectory() && !::CreateDirectory(sampleBasePath.AsNative().c_str(), nullptr))
@@ -1126,12 +1135,12 @@ bool CSoundFile::SaveSFZInstrument(INSTRUMENTINDEX nInstr, std::ostream &f, cons
 	WriteSFZEnvelope(f, tickDuration, 2, ins->PanEnv, "pan", 100.0, [](int32 val) { return 2.0 * (val - ENVELOPE_MID) / (ENVELOPE_MAX - ENVELOPE_MIN); });
 	if(ins->PitchEnv.dwFlags[ENV_FILTER])
 	{
-		const auto envScale = 1200.0 * std::log(CutOffToFrequency(127, 256) / static_cast<double>(CutOffToFrequency(0, -256))) / M_LN2;
+		const auto envScale = 1200.0 * std::log(CutOffToFrequency(127, 256) / static_cast<double>(CutOffToFrequency(0, -256))) / mpt::numbers::ln2;
 		const auto cutoffNormal = CutOffToFrequency(cutoff);
 		WriteSFZEnvelope(f, tickDuration, 3, ins->PitchEnv, "cutoff", envScale, [this, cutoff, cutoffNormal, envScale](int32 val) {
 			// Convert interval between center frequency and envelope into cents
 			const auto freq = CutOffToFrequency(cutoff, (val - ENVELOPE_MID) * 256 / (ENVELOPE_MAX - ENVELOPE_MID));
-			return 1200.0 * std::log(freq / static_cast<double>(cutoffNormal)) / M_LN2 / envScale;
+			return 1200.0 * std::log(freq / static_cast<double>(cutoffNormal)) / mpt::numbers::ln2 / envScale;
 		});
 	} else
 	{

@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 #include "Globals.h"
 #include "PatternCursor.h"
@@ -320,6 +320,9 @@ public:
 	void DrawPatternData(HDC hdc, PATTERNINDEX nPattern, bool selEnable, bool isPlaying, ROWINDEX startRow, ROWINDEX numRows, CHANNELINDEX startChan, CRect &rcClient, int *pypaint);
 	void DrawLetter(int x, int y, char letter, int sizex = 10, int ofsx = 0);
 	void DrawLetter(int x, int y, wchar_t letter, int sizex = 10, int ofsx = 0);
+#if MPT_CXX_AT_LEAST(20)
+	void DrawLetter(int x, int y, char8_t letter, int sizex = 10, int ofsx = 0);
+#endif
 	void DrawNote(int x, int y, UINT note, CTuning *pTuning = nullptr);
 	void DrawInstrument(int x, int y, UINT instr);
 	void DrawVolumeCommand(int x, int y, const ModCommand &mc, bool drawDefaultVolume);
@@ -457,6 +460,7 @@ protected:
 	afx_msg void OnAddChannelFront() { AddChannel(m_MenuCursor.GetChannel(), false); }
 	afx_msg void OnAddChannelAfter() { AddChannel(m_MenuCursor.GetChannel(), true); };
 	afx_msg void OnDuplicateChannel();
+	afx_msg void OnResetChannelColors();
 	afx_msg void OnTransposeChannel();
 	afx_msg void OnRemoveChannel();
 	afx_msg void OnRemoveChannelDialog();

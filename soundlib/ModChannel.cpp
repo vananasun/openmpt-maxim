@@ -15,7 +15,7 @@
 
 OPENMPT_NAMESPACE_BEGIN
 
-void ModChannel::Reset(ResetFlags resetMask, const CSoundFile &sndFile, CHANNELINDEX sourceChannel)
+void ModChannel::Reset(ResetFlags resetMask, const CSoundFile &sndFile, CHANNELINDEX sourceChannel, ChannelFlags muteFlag)
 {
 	if(resetMask & resetSetPosBasic)
 	{
@@ -42,7 +42,10 @@ void ModChannel::Reset(ResetFlags resetMask, const CSoundFile &sndFile, CHANNELI
 		prevNoteOffset = 0;
 		lastZxxParam = 0xFF;
 		isFirstTick = false;
+		triggerNote = false;
 		isPreviewNote = false;
+		isPaused = false;
+		portaTargetReached = false;
 		rowCommand.Clear();
 	}
 
@@ -82,6 +85,11 @@ void ModChannel::Reset(ResetFlags resetMask, const CSoundFile &sndFile, CHANNELI
 			dwFlags = sndFile.ChnSettings[sourceChannel].dwFlags;
 			nPan = sndFile.ChnSettings[sourceChannel].nPan;
 			nGlobalVol = sndFile.ChnSettings[sourceChannel].nVolume;
+			if(dwFlags[CHN_MUTE])
+			{
+				dwFlags.reset(CHN_MUTE);
+				dwFlags.set(muteFlag);
+			}
 		} else
 		{
 			dwFlags.reset();
@@ -157,7 +165,7 @@ void ModChannel::RecalcTuningFreq(Tuning::RATIOTYPE vibratoFactor, Tuning::NOTEI
 	if(sndFile.m_playBehaviour[kITRealNoteMapping] && note >= NOTE_MIN && note <= NOTE_MAX)
 		note = pModInstrument->NoteMap[note - NOTE_MIN];
 
-	nPeriod = mpt::saturate_round<uint32>((nC5Speed << FREQ_FRACBITS) * vibratoFactor * pModInstrument->pTuning->GetRatio(note - NOTE_MIDDLEC + arpeggioSteps, nFineTune + m_PortamentoFineSteps));
+	nPeriod = mpt::saturate_round<uint32>(nC5Speed * vibratoFactor * pModInstrument->pTuning->GetRatio(note - NOTE_MIDDLEC + arpeggioSteps, nFineTune + m_PortamentoFineSteps) * (1 << FREQ_FRACBITS));
 }
 
 

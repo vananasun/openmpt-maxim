@@ -11,7 +11,7 @@ LOCAL_CPPFLAGS += -std=c++17 -fexceptions -frtti
 
 LOCAL_CPP_FEATURES += exceptions rtti
 
-LOCAL_C_INCLUDES += $(LOCAL_PATH) $(LOCAL_PATH)/common $(LOCAL_PATH)/build/svn_version
+LOCAL_C_INCLUDES += $(LOCAL_PATH) $(LOCAL_PATH)/src $(LOCAL_PATH)/common $(LOCAL_PATH)/build/svn_version
 
 LOCAL_CFLAGS   += -fvisibility=hidden -Wall -DLIBOPENMPT_BUILD -DMPT_WITH_ZLIB
 LOCAL_CPPFLAGS +=#-fvisibility=hidden -Wall -DLIBOPENMPT_BUILD -DMPT_WITH_ZLIB
@@ -86,13 +86,8 @@ endif
 
 LOCAL_SRC_FILES += \
 	common/ComponentManager.cpp \
-	common/FileReader.cpp \
 	common/Logging.cpp \
-	common/misc_util.cpp \
 	common/mptFileIO.cpp \
-	common/mptIO.cpp \
-	common/mptLibrary.cpp \
-	common/mptOS.cpp \
 	common/mptPathString.cpp \
 	common/mptRandom.cpp \
 	common/mptString.cpp \
@@ -100,7 +95,6 @@ LOCAL_SRC_FILES += \
 	common/mptStringFormat.cpp \
 	common/mptStringParse.cpp \
 	common/mptTime.cpp \
-	common/mptUUID.cpp \
 	common/Profiler.cpp \
 	common/serialization_utils.cpp \
 	common/version.cpp \

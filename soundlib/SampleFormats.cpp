@@ -17,10 +17,13 @@
 #endif // MODPLUG_TRACKER
 #include "../soundlib/AudioCriticalSection.h"
 #ifndef MODPLUG_NO_FILESAVE
+#include "mpt/io/base.hpp"
+#include "mpt/io/io.hpp"
+#include "mpt/io/io_stdstream.hpp"
 #include "../common/mptFileIO.h"
 #endif // !MODPLUG_NO_FILESAVE
 #include "../common/misc_util.h"
-#include "../common/Endianness.h"
+#include "openmpt/base/Endian.hpp"
 #include "Tagging.h"
 #include "ITTools.h"
 #include "XMTools.h"
@@ -28,15 +31,17 @@
 #include "WAVTools.h"
 #include "../common/version.h"
 #include "Loaders.h"
-#include "ChunkReader.h"
-#include "../soundbase/SampleFormatConverters.h"
-#include "../soundbase/SampleFormatCopy.h"
+#include "../common/FileReader.h"
 #include "../soundlib/ModSampleCopy.h"
 #include <functional>
 #include <map>
 
 
 OPENMPT_NAMESPACE_BEGIN
+
+
+using namespace mpt::uuid_literals;
+
 
 bool CSoundFile::ReadSampleFromFile(SAMPLEINDEX nSample, FileReader &file, bool mayNormalize, bool includeInstrumentFormats)
 {
@@ -360,7 +365,7 @@ static bool IMAADPCMUnpack16(int16 *target, SmpLength sampleLen, FileReader file
 	while(file.CanRead(4u * numChannels) && samplePos < sampleLen)
 	{
 		FileReader block = file.ReadChunk(blockAlign);
-		FileReader::PinnedRawDataView blockView = block.GetPinnedRawDataView();
+		FileReader::PinnedView blockView = block.GetPinnedView();
 		const std::byte *data = blockView.data();
 		const uint32 blockSize = static_cast<uint32>(blockView.size());
 
@@ -416,7 +421,7 @@ bool CSoundFile::ReadWAVSample(SAMPLEINDEX nSample, FileReader &file, bool mayNo
 {
 	WAVReader wavFile(file);
 
-	static constexpr std::array<WAVFormatChunk::SampleFormats, 6> SupportedFormats = {WAVFormatChunk::fmtPCM, WAVFormatChunk::fmtFloat, WAVFormatChunk::fmtIMA_ADPCM, WAVFormatChunk::fmtMP3, WAVFormatChunk::fmtALaw, WAVFormatChunk::fmtULaw};
+	static constexpr WAVFormatChunk::SampleFormats SupportedFormats[] = {WAVFormatChunk::fmtPCM, WAVFormatChunk::fmtFloat, WAVFormatChunk::fmtIMA_ADPCM, WAVFormatChunk::fmtMP3, WAVFormatChunk::fmtALaw, WAVFormatChunk::fmtULaw};
 	if(!wavFile.IsValid()
 	   || wavFile.GetNumChannels() == 0
 	   || wavFile.GetNumChannels() > 2
@@ -580,9 +585,9 @@ bool CSoundFile::SaveWAVSample(SAMPLEINDEX nSample, std::ostream &f) const
 
 struct Wave64FileHeader
 {
-	GUIDms   GuidRIFF;
-	uint64le FileSize;
-	GUIDms   GuidWAVE;
+	mpt::GUIDms GuidRIFF;
+	uint64le    FileSize;
+	mpt::GUIDms GuidWAVE;
 };
 
 MPT_BINARY_STRUCT(Wave64FileHeader, 40)
@@ -590,8 +595,8 @@ MPT_BINARY_STRUCT(Wave64FileHeader, 40)
 
 struct Wave64ChunkHeader
 {
-	GUIDms   GuidChunk;
-	uint64le Size;
+	mpt::GUIDms GuidChunk;
+	uint64le    Size;
 };
 
 MPT_BINARY_STRUCT(Wave64ChunkHeader, 24)
@@ -623,7 +628,7 @@ struct Wave64Chunk
 MPT_BINARY_STRUCT(Wave64Chunk, 24)
 
 
-static void Wave64TagFromLISTINFO(mpt::ustring & dst, uint16 codePage, const ChunkReader::ChunkList<RIFFChunk> & infoChunk, RIFFChunk::ChunkIdentifiers id)
+static void Wave64TagFromLISTINFO(mpt::ustring & dst, uint16 codePage, const FileReader::ChunkList<RIFFChunk> & infoChunk, RIFFChunk::ChunkIdentifiers id)
 {
 	if(!infoChunk.ChunkExists(id))
 	{
@@ -636,8 +641,8 @@ static void Wave64TagFromLISTINFO(mpt::ustring & dst, uint16 codePage, const Chu
 	}
 	std::string str;
 	textChunk.ReadString<mpt::String::maybeNullTerminated>(str, textChunk.GetLength());
-	str = mpt::String::Replace(str, std::string("\r\n"), std::string("\n"));
-	str = mpt::String::Replace(str, std::string("\r"), std::string("\n"));
+	str = mpt::replace(str, std::string("\r\n"), std::string("\n"));
+	str = mpt::replace(str, std::string("\r"), std::string("\n"));
 	dst = mpt::ToUnicode(codePage, mpt::Charset::Windows1252, str);
 }
 
@@ -679,7 +684,7 @@ bool CSoundFile::ReadW64Sample(SAMPLEINDEX nSample, FileReader &file, bool mayNo
 		return false;
 	}
 
-	ChunkReader chunkFile = file;
+	FileReader chunkFile = file;
 	auto chunkList = chunkFile.ReadChunks<Wave64Chunk>(8);
 
 	if(!chunkList.ChunkExists(guidFMT))
@@ -765,7 +770,7 @@ bool CSoundFile::ReadW64Sample(SAMPLEINDEX nSample, FileReader &file, bool mayNo
 
 	if(chunkList.ChunkExists(guidLIST))
 	{
-		ChunkReader listChunk = chunkList.GetChunk(guidLIST);
+		FileReader listChunk = chunkList.GetChunk(guidLIST);
 		if(listChunk.ReadMagic("INFO"))
 		{
 			auto infoChunk = listChunk.ReadChunks<RIFFChunk>(2);
@@ -1130,7 +1135,7 @@ bool CSoundFile::ReadS3ISample(SAMPLEINDEX nSample, FileReader &file)
 	if(!file.ReadStruct(sampleHeader)
 		|| (sampleHeader.sampleType != S3MSampleHeader::typePCM && sampleHeader.sampleType != S3MSampleHeader::typeAdMel)
 		|| (memcmp(sampleHeader.magic, "SCRS", 4) && memcmp(sampleHeader.magic, "SCRI", 4))
-		|| !file.Seek((sampleHeader.dataPointer[1] << 4) | (sampleHeader.dataPointer[2] << 12) | (sampleHeader.dataPointer[0] << 20)))
+		|| !file.Seek(sampleHeader.GetSampleOffset()))
 	{
 		return false;
 	}
@@ -1562,8 +1567,7 @@ bool CSoundFile::ReadCAFSample(SAMPLEINDEX nSample, FileReader &file, bool mayNo
 		return false;
 	}
 
-	ChunkReader chunkFile = file;
-	auto chunkList = chunkFile.ReadChunks<CAFChunk>(0);
+	auto chunkList = file.ReadChunks<CAFChunk>(0);
 
 	CAFAudioFormat audioFormat;
 	if(!chunkList.GetChunk(CAFChunk::iddesc).ReadStruct(audioFormat))
@@ -1878,18 +1882,17 @@ MPT_BINARY_STRUCT(AIFFInstrumentChunk, 20)
 bool CSoundFile::ReadAIFFSample(SAMPLEINDEX nSample, FileReader &file, bool mayNormalize)
 {
 	file.Rewind();
-	ChunkReader chunkFile(file);
 
 	// Verify header
 	AIFFHeader fileHeader;
-	if(!chunkFile.ReadStruct(fileHeader)
+	if(!file.ReadStruct(fileHeader)
 		|| memcmp(fileHeader.magic, "FORM", 4)
 		|| (memcmp(fileHeader.type, "AIFF", 4) && memcmp(fileHeader.type, "AIFC", 4)))
 	{
 		return false;
 	}
 
-	auto chunks = chunkFile.ReadChunks<AIFFChunk>(2);
+	auto chunks = file.ReadChunks<AIFFChunk>(2);
 
 	// Read COMM chunk
 	FileReader commChunk(chunks.GetChunk(AIFFChunk::idCOMM));
@@ -1925,8 +1928,7 @@ bool CSoundFile::ReadAIFFSample(SAMPLEINDEX nSample, FileReader &file, bool mayN
 	// Read SSND chunk
 	FileReader soundChunk(chunks.GetChunk(AIFFChunk::idSSND));
 	AIFFSoundChunk sampleHeader;
-	if(!soundChunk.ReadStruct(sampleHeader)
-		|| !soundChunk.CanRead(sampleHeader.offset))
+	if(!soundChunk.ReadStruct(sampleHeader))
 	{
 		return false;
 	}
@@ -1947,7 +1949,7 @@ bool CSoundFile::ReadAIFFSample(SAMPLEINDEX nSample, FileReader &file, bool mayN
 		endian,
 		SampleIO::signedPCM);
 
-	if(!memcmp(compression, "fl32", 4) || !memcmp(compression, "FL32", 4) || !memcmp(compression, "fl64", 4))
+	if(!memcmp(compression, "fl32", 4) || !memcmp(compression, "FL32", 4) || !memcmp(compression, "fl64", 4) || !memcmp(compression, "FL64", 4))
 	{
 		sampleIO |= SampleIO::floatPCM;
 	} else if(!memcmp(compression, "alaw", 4) || !memcmp(compression, "ALAW", 4))
@@ -1958,6 +1960,9 @@ bool CSoundFile::ReadAIFFSample(SAMPLEINDEX nSample, FileReader &file, bool mayN
 	{
 		sampleIO |= SampleIO::uLaw;
 		sampleIO |= SampleIO::_16bit;
+	} else if(!memcmp(compression, "raw ", 4))
+	{
+		sampleIO |= SampleIO::unsignedPCM;
 	}
 
 	if(mayNormalize)
@@ -1965,7 +1970,10 @@ bool CSoundFile::ReadAIFFSample(SAMPLEINDEX nSample, FileReader &file, bool mayN
 		sampleIO.MayNormalize();
 	}
 
-	soundChunk.Skip(sampleHeader.offset);
+	if(soundChunk.CanRead(sampleHeader.offset))
+	{
+		soundChunk.Skip(sampleHeader.offset);
+	}
 
 	ModSample &mptSample = Samples[nSample];
 	DestroySampleThreadsafe(nSample);
@@ -2053,7 +2061,7 @@ static bool AUIsAnnotationLineWithField(const std::string &line)
 	// Scan for invalid chars
 	for(auto c : field)
 	{
-		if(!IsInRange(c, 'a', 'z') && !IsInRange(c, 'A', 'Z') && !IsInRange(c, '0', '9') && c != '-' && c != '_')
+		if(!mpt::is_in_range(c, 'a', 'z') && !mpt::is_in_range(c, 'A', 'Z') && !mpt::is_in_range(c, '0', '9') && c != '-' && c != '_')
 		{
 			return false;
 		}
@@ -2144,8 +2152,8 @@ bool CSoundFile::ReadAUSample(SAMPLEINDEX nSample, FileReader &file, bool mayNor
 	file.Seek(24);
 	std::string annotation;
 	file.ReadString<mpt::String::maybeNullTerminated>(annotation, dataOffset - 24);
-	annotation = mpt::String::Replace(annotation, "\r\n", "\n");
-	annotation = mpt::String::Replace(annotation, "\r", "\n");
+	annotation = mpt::replace(annotation, std::string("\r\n"), std::string("\n"));
+	annotation = mpt::replace(annotation, std::string("\r"), std::string("\n"));
 	mpt::Charset charset = mpt::IsUTF8(annotation) ? mpt::Charset::UTF8 : mpt::Charset::ISO8859_1;
 	const auto lines = mpt::String::Split<std::string>(annotation, "\n");
 	bool hasFields = false;
@@ -2165,7 +2173,7 @@ bool CSoundFile::ReadAUSample(SAMPLEINDEX nSample, FileReader &file, bool mayNor
 		{
 			if(AUIsAnnotationLineWithField(line))
 			{
-				lastField = mpt::ToLowerCaseAscii(mpt::String::Trim(AUGetAnnotationFieldFromLine(line)));
+				lastField = mpt::ToLowerCaseAscii(mpt::trim(AUGetAnnotationFieldFromLine(line)));
 			}
 			linesPerField[lastField].push_back(AUTrimFieldFromAnnotationLine(line));
 		}
@@ -2179,7 +2187,7 @@ bool CSoundFile::ReadAUSample(SAMPLEINDEX nSample, FileReader &file, bool mayNor
 	{
 		// Most applications tend to write their own name here,
 		// thus there is little use in interpreting the string as a title.
-		annotation = mpt::String::RTrim(annotation, std::string("\r\n"));
+		annotation = mpt::trim_right(annotation, std::string("\r\n"));
 		tags.comments = mpt::ToUnicode(charset, annotation);
 	}
 
@@ -2539,8 +2547,7 @@ bool CSoundFile::ReadIFFSample(SAMPLEINDEX nSample, FileReader &file)
 		return false;
 	}
 
-	ChunkReader chunkFile(file);
-	const auto chunks = chunkFile.ReadChunks<IFFChunk>(2);
+	const auto chunks = file.ReadChunks<IFFChunk>(2);
 	FileReader sampleData;
 
 	SampleIO sampleIO(SampleIO::_8bit, SampleIO::mono, SampleIO::bigEndian, SampleIO::signedPCM);

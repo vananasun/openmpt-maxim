@@ -18,6 +18,8 @@
 #ifdef MODPLUG_TRACKER
 #include "../Mptrack.h"
 #endif
+#include "mpt/io/io.hpp"
+#include "mpt/io/io_stdstream.hpp"
 
 
 OPENMPT_NAMESPACE_BEGIN
@@ -68,7 +70,7 @@ void MidiInOut::SaveAllParameters()
 		return;
 
 	m_pMixStruct->defaultProgram = -1;
-	m_pMixStruct->pluginData.assign(chunk.cbegin(), chunk.cend());
+	m_pMixStruct->pluginData.assign(chunk.begin(), chunk.end());
 }
 
 
@@ -216,6 +218,7 @@ void MidiInOut::SetChunk(const ChunkData &chunk, bool /*isBank*/)
 
 void MidiInOut::SetParameter(PlugParamIndex index, PlugParamValue value)
 {
+	value = mpt::safe_clamp(value, 0.0f, 1.0f);
 	MidiDevice::ID newDevice = ParameterToDeviceID(value);
 	OpenDevice(newDevice, (index == kInputParameter));
 

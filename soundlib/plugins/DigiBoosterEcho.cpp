@@ -24,8 +24,6 @@ IMixPlugin* DigiBoosterEcho::Create(VSTPluginLib &factory, CSoundFile &sndFile, 
 
 DigiBoosterEcho::DigiBoosterEcho(VSTPluginLib &factory, CSoundFile &sndFile, SNDMIXPLUGIN *mixStruct)
 	: IMixPlugin(factory, sndFile, mixStruct)
-	, m_bufferSize(0)
-	, m_writePos(0)
 	, m_sampleRate(sndFile.GetSampleRate())
 	, m_chunk(PluginChunk::Default())
 {
@@ -124,7 +122,7 @@ void DigiBoosterEcho::SetParameter(PlugParamIndex index, PlugParamValue value)
 {
 	if(index < kEchoNumParameters)
 	{
-		m_chunk.param[index] = mpt::saturate_round<uint8>(value * 255.0f);
+		m_chunk.param[index] = mpt::saturate_round<uint8>(mpt::safe_clamp(value, 0.0f, 1.0f) * 255.0f);
 		RecalculateEchoParams();
 	}
 }

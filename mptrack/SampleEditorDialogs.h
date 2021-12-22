@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 #include "../common/FileReaderFwd.h"
 #include "../soundlib/SampleIO.h"
@@ -216,7 +216,7 @@ protected:
 
 class CResamplingDlg: public CDialog
 {
-protected:
+public:
 	enum ResamplingOption
 	{
 		Upsample,
@@ -224,15 +224,20 @@ protected:
 		Custom
 	};
 
+protected:
 	ResamplingMode m_srcMode;
 	uint32 m_frequency;
-	static uint32 lastFrequency;
-	static ResamplingOption lastChoice;
+	bool m_resampleAll;
+	static uint32 m_lastFrequency;
+	static ResamplingOption m_lastChoice;
+	static bool m_updatePatterns;
 
 public:
-	CResamplingDlg(CWnd *parent, uint32 frequency, ResamplingMode srcMode) : CDialog(IDD_RESAMPLE, parent), m_srcMode(srcMode), m_frequency(frequency) { };
+	CResamplingDlg(CWnd *parent, uint32 frequency, ResamplingMode srcMode, bool resampleAll) : CDialog(IDD_RESAMPLE, parent), m_srcMode(srcMode), m_frequency(frequency), m_resampleAll(resampleAll) { };
 	uint32 GetFrequency() const { return m_frequency; }
 	ResamplingMode GetFilter() const { return m_srcMode; }
+	static ResamplingOption GetResamplingOption() { return m_lastChoice; }
+	static bool UpdatePatternCommands() { return m_updatePatterns; }
 
 protected:
 	BOOL OnInitDialog() override;

@@ -1,5 +1,5 @@
 /*
- * ctrl_pat.h
+ * Ctrl_pat.h
  * ----------
  * Purpose: Pattern tab, upper panel.
  * Notes  : (currently none)
@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 #include "Globals.h"
 #include "PatternCursor.h"
@@ -71,7 +71,8 @@ public:
 	// Check if this module is currently playing
 	bool IsPlaying() const;
 
-	ORDERINDEX GetOrderFromPoint(const CRect& rect, const CPoint& pt) const;
+	ORDERINDEX GetOrderFromPoint(const CPoint &pt) const;
+	CRect GetRectFromOrder(ORDERINDEX ord) const;
 
 	// Get the currently selected pattern(s).
 	// Set ignoreSelection to true if only the first selected point is important.

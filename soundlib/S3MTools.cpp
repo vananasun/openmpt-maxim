@@ -52,9 +52,14 @@ void S3MSampleHeader::ConvertToMPT(ModSample &mptSmp, bool isST3) const
 
 	// C-5 frequency
 	mptSmp.nC5Speed = c5speed;
-	// ST3 ignores the high 16 bits
 	if(isST3)
-		mptSmp.nC5Speed &= 0xFFFF;
+	{
+		// ST3 ignores or clamps the high 16 bits depending on the instrument type
+		if(sampleType == typeAdMel)
+			mptSmp.nC5Speed &= 0xFFFF;
+		else
+			LimitMax(mptSmp.nC5Speed, uint16_max);
+	}
 
 	if(mptSmp.nC5Speed == 0)
 		mptSmp.nC5Speed = 8363;
@@ -129,6 +134,13 @@ SampleIO S3MSampleHeader::GetSampleFormat(bool signedSamples) const
 			SampleIO::littleEndian,
 			signedSamples ? SampleIO::signedPCM : SampleIO::unsignedPCM);
 	}
+}
+
+
+// Calculate the sample position in file
+uint32 S3MSampleHeader::GetSampleOffset() const
+{
+	return (dataPointer[1] << 4) | (dataPointer[2] << 12) | (dataPointer[0] << 20);
 }
 
 

@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
 #include "ModSample.h"
 #include "ModInstrument.h"
@@ -71,16 +71,17 @@ struct ModChannel
 	int32 newLeftVol, newRightVol;
 	int32 nRealVolume, nRealPan;
 	int32 nVolume, nPan, nFadeOutVol;
-	int32 nPeriod;  // Frequency in Hz if !CSoundFile::PeriodsAreFrequencies() or using custom tuning, 4x Amiga periods otherwise
+	int32 nPeriod;  // Frequency in Hz if CSoundFile::PeriodsAreFrequencies() or using custom tuning, 4x Amiga periods otherwise
 	int32 nC5Speed, nPortamentoDest;
 	int32 cachedPeriod, glissandoPeriod;
 	int32 nCalcVolume;                 // Calculated channel volume, 14-Bit (without global volume, pre-amp etc applied) - for MIDI macros
 	EnvInfo VolEnv, PanEnv, PitchEnv;  // Envelope playback info
 	int32 nGlobalVol;                  // Channel volume (CV in ITTECH.TXT) 0...64
 	int32 nInsVol;                     // Sample / Instrument volume (SV * IV in ITTECH.TXT) 0...64
-	int32 nPortamentoSlide, nAutoVibDepth;
+	int32 nAutoVibDepth;
 	uint32 nEFxOffset;  // Offset memory for Invert Loop (EFx, .MOD only)
 	ROWINDEX nPatternLoop;
+	uint16 portamentoSlide;
 	int16 nTranspose;
 	int16 nFineTune;
 	int16 microTuning;  // Micro-tuning / MIDI pitch wheel command
@@ -119,8 +120,11 @@ struct ModChannel
 	uint8 nEFxSpeed, nEFxDelay;              // memory for Invert Loop (EFx, .MOD only)
 	uint8 noteSlideParam, noteSlideCounter;  // IMF / PTM Note Slide
 	uint8 lastZxxParam;                      // Memory for \xx slides
-	bool isFirstTick : 1;
-	bool isPreviewNote : 1;
+	bool isFirstTick : 1;                    // Execute tick-0 effects on this channel? (condition differs between formats due to Pattern Delay commands)
+	bool triggerNote : 1;                    // Trigger note on this tick on this channel if there is one?
+	bool isPreviewNote : 1;                  // Notes preview in editor
+	bool isPaused : 1;                       // Don't mix or increment channel position, but keep the note alive
+	bool portaTargetReached : 1;             // Tone portamento is finished
 
 	//-->Variables used to make user-definable tuning modes work with pattern effects.
 	//If true, freq should be recalculated in ReadNote() on first tick.
@@ -176,7 +180,7 @@ struct ModChannel
 		resetTotal           = resetSetPosFull,
 	};
 
-	void Reset(ResetFlags resetMask, const CSoundFile &sndFile, CHANNELINDEX sourceChannel);
+	void Reset(ResetFlags resetMask, const CSoundFile &sndFile, CHANNELINDEX sourceChannel, ChannelFlags muteFlag);
 	void Stop();
 
 	bool IsSamplePlaying() const noexcept { return !increment.IsZero(); }

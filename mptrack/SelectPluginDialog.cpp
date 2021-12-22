@@ -143,15 +143,18 @@ void CSelectPluginDlg::OnOK()
 			CriticalSection cs;
 
 			// Destroy old plugin, if there was one.
+			const auto oldOutput = m_pPlugin->GetOutputPlugin();
 			m_pPlugin->Destroy();
 
 			// Initialize plugin info
 			MemsetZero(m_pPlugin->Info);
+			if(oldOutput != PLUGINDEX_INVALID)
+				m_pPlugin->SetOutputPlugin(oldOutput);
 			m_pPlugin->Info.dwPluginId1 = pFactory->pluginId1;
 			m_pPlugin->Info.dwPluginId2 = pFactory->pluginId2;
 			m_pPlugin->editorX = m_pPlugin->editorY = int32_min;
 
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 			if(m_pPlugin->Info.dwPluginId1 == Vst::kEffectMagic)
 			{
 				switch(m_pPlugin->Info.dwPluginId2)
@@ -162,7 +165,7 @@ void CSelectPluginDlg::OnOK()
 					break;
 				}
 			}
-#endif // NO_VST
+#endif // MPT_WITH_VST
 
 			m_pPlugin->Info.szName = pFactory->libraryName.ToLocale();
 			m_pPlugin->Info.szLibraryName = pFactory->libraryName.ToUTF8();
@@ -331,6 +334,7 @@ void CSelectPluginDlg::UpdatePluginsList(const VSTPluginLib *forceSelect)
 		{ VSTPluginLib::catUnknown,        _T("Unsorted") },
 		{ VSTPluginLib::catDMO,            _T("DirectX Media Audio Effects") },
 		{ VSTPluginLib::catSynth,          _T("Instrument Plugins") },
+		{ VSTPluginLib::catHidden,         _T("Legacy Plugins") },
 	};
 
 	const HTREEITEM noPlug = AddTreeItem(_T("No plugin (empty slot)"), IMAGE_NOPLUGIN, false);
@@ -365,6 +369,9 @@ void CSelectPluginDlg::UpdatePluginsList(const VSTPluginLib *forceSelect)
 		{
 			MPT_ASSERT(p);
 			const VSTPluginLib &plug = *p;
+			if(plug.category == VSTPluginLib::catHidden && (m_pPlugin == nullptr || m_pPlugin->pMixPlugin == nullptr || &m_pPlugin->pMixPlugin->GetPluginFactory() != p))
+				continue;
+
 			if(nameFilterActive)
 			{
 				// Apply name filter
@@ -403,12 +410,12 @@ void CSelectPluginDlg::UpdatePluginsList(const VSTPluginLib *forceSelect)
 			}
 
 			CString title = plug.libraryName.ToCString();
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 			if(!plug.IsNativeFromCache())
 			{
 				title += MPT_CFORMAT(" ({})")(plug.GetDllArchNameUser());
 			}
-#endif // !NO_VST
+#endif // MPT_WITH_VST
 			HTREEITEM h = AddTreeItem(title, plug.isInstrument ? IMAGE_PLUGININSTRUMENT : IMAGE_EFFECTPLUGIN, true, categoryFolders[plug.category], reinterpret_cast<LPARAM>(&plug));
 			categoryUsed[plug.category] = true;
 
@@ -454,11 +461,11 @@ void CSelectPluginDlg::UpdatePluginsList(const VSTPluginLib *forceSelect)
 				} else if(plug.pluginId2 == lastPluginID && foundPlugin < kSameIdAsLastWithPlatformMatch)
 				{
 					// Previously selected plugin
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 					foundPlugin = plug.IsNativeFromCache() ? kSameIdAsLastWithPlatformMatch : kSameIdAsLast;
-#else // NO_VST
+#else // !MPT_WITH_VST
 					foundPlugin = kSameIdAsLastWithPlatformMatch;
-#endif // !NO_VST
+#endif // MPT_WITH_VST
 					currentPlug = h;
 				}
 			}
@@ -530,7 +537,7 @@ void CSelectPluginDlg::OnSelChanged(NMHDR *, LRESULT *result)
 			SetDlgItemText(IDC_TEXT_CURRENT_VSTPLUG, pPlug->dllPath.ToCString());
 		SetDlgItemText(IDC_PLUGINTAGS, mpt::ToCString(pPlug->tags));
 		enableRemoveButton = pPlug->isBuiltIn ? FALSE : TRUE;
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 		if(pPlug->pluginId1 == Vst::kEffectMagic && !pPlug->isBuiltIn)
 		{
 			bool isBridgeAvailable =
@@ -573,7 +580,7 @@ void CSelectPluginDlg::OnSelChanged(NMHDR *, LRESULT *result)
 			showBoxes = true;
 		}
 		enableTagsTextBox = TRUE;
-#endif
+#endif // MPT_WITH_VST
 	} else
 	{
 		SetDlgItemText(IDC_VENDOR, _T(""));
@@ -595,7 +602,7 @@ void CSelectPluginDlg::OnSelChanged(NMHDR *, LRESULT *result)
 }
 
 
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 namespace
 {
 // TODO: Keep these lists up-to-date.
@@ -613,7 +620,7 @@ constexpr struct
 	{Vst::kEffectMagic, Vst::FourCC("MMID"), "MIDI Input Output", "* The MIDI Input / Output plugin is now built right into OpenMPT and should not be loaded from an external file."},
 };
 
-// Plugins that should always be bridged.
+// Plugins that should always be bridged or require a specific bridge mode.
 constexpr struct
 {
 	int32 id1;
@@ -630,17 +637,17 @@ constexpr struct
 	{Vst::kEffectMagic, Vst::FourCC("S1Vs"), mpt::arch_bits == 64, true, false},  // Synth1 64-bit has an issue with pointers using the high 32 bits, hence must use the legacy bridge without high-entropy heap
 };
 }  // namespace
-#endif
+#endif // MPT_WITH_VST
 
 
 bool CSelectPluginDlg::VerifyPlugin(VSTPluginLib *plug, CWnd *parent)
 {
-#ifndef NO_VST
+#ifdef MPT_WITH_VST
 	for(const auto &p : ProblematicPlugins)
 	{
 		if(p.id2 == plug->pluginId2 && p.id1 == plug->pluginId1)
 		{
-			std::string s = MPT_FORMAT("WARNING: This plugin has been identified as {},\nwhich is known to have the following problem with OpenMPT:\n\n{}\n\nWould you still like to add this plugin to the library?")(p.name, p.problem);
+			std::string s = MPT_AFORMAT("WARNING: This plugin has been identified as {},\nwhich is known to have the following problem with OpenMPT:\n\n{}\n\nWould you still like to add this plugin to the library?")(p.name, p.problem);
 			if(Reporting::Confirm(s, false, false, parent) == cnfNo)
 			{
 				return false;
@@ -655,15 +662,16 @@ bool CSelectPluginDlg::VerifyPlugin(VSTPluginLib *plug, CWnd *parent)
 		{
 			plug->useBridge = p.useBridge;
 			plug->shareBridgeInstance = p.shareInstance;
-			plug->modernBridge = p.modernBridge;
+			if(!p.modernBridge)
+				plug->modernBridge = false;
 			plug->WriteToCache();
 			break;
 		}
 	}
-#else // NO_VST
+#else // !MPT_WITH_VST
 	MPT_UNREFERENCED_PARAMETER(plug);
 	MPT_UNREFERENCED_PARAMETER(parent);
-#endif // NO_VST
+#endif // MPT_WITH_VST
 	return true;
 }
 
@@ -781,7 +789,7 @@ VSTPluginLib *CSelectPluginDlg::ScanPlugins(const mpt::PathString &path, CWnd *p
 	if(update)
 	{
 		// Force selection to last added plug.
-		Reporting::Information(MPT_FORMAT("Found {} plugin{}.")(files, files == 1 ? "" : "s").c_str(), parent);
+		Reporting::Information(MPT_AFORMAT("Found {} plugin{}.")(files, files == 1 ? "" : "s").c_str(), parent);
 		return plugLib;
 	} else
 	{

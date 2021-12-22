@@ -11,18 +11,19 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
+
+#include "mpt/uuid/uuid.hpp"
 
 #include "../common/Logging.h"
 #include "../common/version.h"
-#include "../common/mptUUID.h"
-#include "../soundbase/SampleFormat.h"
+#include "openmpt/soundbase/SampleFormat.hpp"
 #include "../soundlib/MixerSettings.h"
 #include "../soundlib/Resampler.h"
 #include "../sounddsp/EQ.h"
 #include "../sounddsp/DSP.h"
 #include "../sounddsp/Reverb.h"
-#include "../sounddev/SoundDevice.h"
+#include "openmpt/sounddevice/SoundDevice.hpp"
 #include "StreamEncoderSettings.h"
 #include "Settings.h"
 
@@ -86,6 +87,7 @@ enum ModColor : uint8
 	// Internal color codes (not saved to color preset files)
 	MODCOLOR_2NDHIGHLIGHT,
 	MODCOLOR_DEFAULTVOLUME,
+	MODCOLOR_DUMMYCOMMAND,
 	MAX_MODPALETTECOLORS
 };
 
@@ -142,6 +144,8 @@ enum ModColor : uint8
 #define MIDISETUP_MIDIMACROPITCHBEND		0x400	// Record MIDI pitch bend messages a MIDI macro changes in pattern
 
 
+#ifndef NO_EQ
+
 // EQ
 
 struct EQPresetPacked
@@ -178,6 +182,8 @@ template<> inline EQPreset FromSettingValue(const SettingValue &val)
 	std::copy(valpacked.Freqs, valpacked.Freqs + MAX_EQ_BANDS, valresult.Freqs);
 	return valresult;
 }
+
+#endif // !NO_EQ
 
 
 template<> inline SettingValue ToSettingValue(const mpt::UUID &val) { return SettingValue(val.ToUString()); }
@@ -587,7 +593,7 @@ private:
 
 	// Debug
 
-#if !defined(NO_LOGGING) && !defined(MPT_LOG_IS_DISABLED)
+#if !defined(MPT_LOG_IS_DISABLED)
 	Setting<int> DebugLogLevel;
 	Setting<std::string> DebugLogFacilitySolo;
 	Setting<std::string> DebugLogFacilityBlocked;
@@ -612,6 +618,26 @@ public:
 	~DebugSettings();
 
 };
+
+
+namespace SoundDevice
+{
+namespace Legacy
+{
+typedef uint16 ID;
+inline constexpr SoundDevice::Legacy::ID MaskType = 0xff00;
+inline constexpr SoundDevice::Legacy::ID MaskIndex = 0x00ff;
+inline constexpr int ShiftType = 8;
+inline constexpr int ShiftIndex = 0;
+inline constexpr SoundDevice::Legacy::ID TypeWAVEOUT          = 0;
+inline constexpr SoundDevice::Legacy::ID TypeDSOUND           = 1;
+inline constexpr SoundDevice::Legacy::ID TypeASIO             = 2;
+inline constexpr SoundDevice::Legacy::ID TypePORTAUDIO_WASAPI = 3;
+inline constexpr SoundDevice::Legacy::ID TypePORTAUDIO_WDMKS  = 4;
+inline constexpr SoundDevice::Legacy::ID TypePORTAUDIO_WMME   = 5;
+inline constexpr SoundDevice::Legacy::ID TypePORTAUDIO_DS     = 6;
+} // namespace Legacy
+} // namespace SoundDevice
 
 
 class TrackerSettings
@@ -676,6 +702,7 @@ public:
 	Setting<ProcessPriorityClass> MiscProcessPriorityClass;
 	Setting<bool> MiscFlushFileBuffersOnSave;
 	Setting<bool> MiscCacheCompleteFileBeforeLoading;
+	Setting<bool> MiscUseSingleInstance;
 
 	// Sound Settings
 
@@ -940,7 +967,11 @@ protected:
 
 	static std::vector<uint32> GetDefaultSampleRates();
 
+#ifndef NO_EQ
+
 	void FixupEQ(EQPreset &eqSettings);
+
+#endif // !NO_EQ
 
 	void LoadChords(MPTChords &chords);
 	void SaveChords(MPTChords &chords);

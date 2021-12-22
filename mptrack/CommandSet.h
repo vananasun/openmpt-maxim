@@ -10,9 +10,9 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 #include <string>
-#include "../common/FlagSet.h"
+#include "openmpt/base/FlagSet.hpp"
 #include <map>
 #include <bitset>
 
@@ -85,6 +85,7 @@ enum CommandID
 	kcFileSaveAsWave,
 	kcFileSaveAsMP3,
 	kcFileSaveMidi,
+	kcFileSaveOPL,
 	kcFileExportCompat,
 	kcPrevDocument,
 	kcNextDocument,
@@ -106,7 +107,13 @@ enum CommandID
 	kcEstimateSongLength,
 	kcApproxRealBPM,
 	kcMidiRecord,
-	kcEndPlayCommands = kcMidiRecord,
+	kcTempoIncrease,
+	kcTempoDecrease,
+	kcTempoIncreaseFine,
+	kcTempoDecreaseFine,
+	kcSpeedIncrease,
+	kcSpeedDecrease,
+	kcEndPlayCommands = kcSpeedDecrease,
 
 	kcStartEditCommands,
 	kcEditUndo = kcStartEditCommands,
@@ -145,6 +152,7 @@ enum CommandID
 	kcShowMacroConfig,
 	kcViewMIDImapping,
 	kcViewEditHistory,
+	kcViewToggle,
 	kcSwitchToInstrLibrary,
 	kcHelp,
 	kcEndView = kcHelp,
@@ -290,6 +298,8 @@ enum CommandID
 	kcChordEditor,
 	kcChangeLoopStatus,
 	kcShowEditMenu,
+	kcShowChannelCtxMenu,
+	kcShowChannelPluginCtxMenu,
 	kcTimeAtRow,
 	kcLockPlaybackToRows,
 	kcQuantizeSettings,
@@ -654,7 +664,6 @@ enum CommandID
 	kcSetFXEnd = kcSetFXFinetuneSmooth,
 
 	kcStartInstrumentMisc,
-	// Note: Order must be the same as kcStartSampleMisc because commands are propagated!
 	kcInstrumentLoad = kcStartInstrumentMisc,
 	kcInstrumentSave,
 	kcInstrumentNew,
@@ -715,6 +724,7 @@ enum CommandID
 
 	kcStartSampleMisc,
 	kcSampleLoad = kcStartSampleMisc,
+	kcSampleLoadRaw,
 	kcSampleSave,
 	kcSampleNew,
 	kcSampleDuplicate,
@@ -873,7 +883,8 @@ enum CommandID
 	kcStartCommentsCommands,
 	kcToggleSmpInsList = kcStartCommentsCommands,
 	kcExecuteSmpInsListItem,
-	kcEndCommentsCommands = kcExecuteSmpInsListItem,
+	kcRenameSmpInsListItem,
+	kcEndCommentsCommands = kcRenameSmpInsListItem,
 
 	kcNumCommands,
 };

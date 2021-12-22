@@ -179,7 +179,7 @@ bool CModDoc::ChangeModType(MODTYPE nNewType)
 	for(auto &pat : m_SndFile.Patterns) if(pat.IsValid())
 	{
 		// This is used for -> MOD/XM conversion
-		std::vector<ModCommand::PARAM[MAX_EFFECTS]> effMemory(GetNumChannels());
+		std::vector<std::array<ModCommand::PARAM, MAX_EFFECTS>> effMemory(GetNumChannels());
 		std::vector<ModCommand::VOL> volMemory(GetNumChannels(), 0);
 		std::vector<ModCommand::INSTR> instrMemory(GetNumChannels(), 0);
 
@@ -539,18 +539,8 @@ bool CModDoc::ChangeModType(MODTYPE nNewType)
 		warnings.set(wVolRamp);
 	}
 
-	{
-		CriticalSection cs;
-		m_SndFile.ChangeModTypeTo(nNewType);
-	}
-
-	if(m_SndFile.Order.CanSplitSubsongs() && Reporting::Confirm("The order list contains separator items.\nThe new format supports multiple sequences. Do you want to split the sequence at the separators into multiple song sequences?",
-		"Order list conversion", false, true) == cnfYes)
-	{
-		m_SndFile.Order.SplitSubsongsToMultipleSequences();
-	}
-
 	CriticalSection cs;
+	m_SndFile.ChangeModTypeTo(nNewType);
 
 	// In case we need to update IT bidi loop handling pre-computation or loops got changed...
 	m_SndFile.PrecomputeSampleLoops(false);
