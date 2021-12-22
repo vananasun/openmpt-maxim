@@ -23,7 +23,7 @@
 #include "../soundlib/mod_specifications.h"
 #ifdef MPT_WITH_REWIRE
 #include "../mptrack/Mainfrm.h"
-#include "../sounddev/SoundDeviceReWire.h"
+#include "openmpt/sounddevice/SoundDeviceReWire.hpp"
 #endif
 
 

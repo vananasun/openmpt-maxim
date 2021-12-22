@@ -52,7 +52,7 @@
 #include "mpt/io/io.hpp"
 #include "mpt/io/io_stdstream.hpp"
 #ifdef MPT_WITH_REWIRE
-#include "../sounddev/SoundDeviceReWire.h"
+#include "openmpt/sounddevice/SoundDeviceReWire.hpp"
 #include "../mptrack/Mainfrm.h"
 #endif
 #ifdef MPT_WITH_APC

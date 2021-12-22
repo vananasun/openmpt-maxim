@@ -54,7 +54,7 @@
 #include "APC/APC.h"
 #endif
 #ifdef MPT_WITH_REWIRE
-#include "../sounddev/SoundDeviceReWire.h"
+#include "openmpt/sounddevice/SoundDeviceReWire.hpp"
 #endif
 
 

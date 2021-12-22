@@ -22,12 +22,10 @@
 
 OPENMPT_NAMESPACE_BEGIN
 
-#define MAX_EQ_BANDS	6
-
-#ifndef NO_EQ
-
 inline constexpr std::size_t MAX_EQ_CHANNELS = 4;
 inline constexpr std::size_t MAX_EQ_BANDS = 6;
+
+#ifndef NO_EQ
 
 struct EQBANDSTATE
 {

@@ -17,7 +17,7 @@
 
 
 #ifdef MPT_WITH_REWIRE
-#include "../sounddev/SoundDeviceReWire.h"
+#include "openmpt/sounddevice/SoundDeviceReWire.hpp"
 #include "../mptrack/Mainfrm.h"
 #endif
 #include "stdafx.h"

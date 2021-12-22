@@ -24,7 +24,7 @@
 #include "ChannelManagerDlg.h"
 #include "../common/mptStringBuffer.h"
 #ifdef MPT_WITH_REWIRE
-#include "../sounddev/SoundDeviceReWire.h"
+#include "openmpt/sounddevice/SoundDeviceReWire.hpp"
 #endif
 
 OPENMPT_NAMESPACE_BEGIN

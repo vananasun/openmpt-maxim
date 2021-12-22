@@ -136,6 +136,13 @@ std::vector<std::shared_ptr<IDevicesEnumerator>> Manager::GetEnabledEnumerators(
 		result.push_back(std::make_shared<DevicesEnumerator<CRtAudioDevice>>());
 	}
 #endif  // MPT_WITH_RTAUDIO
+
+#ifdef MPT_WITH_REWIRE
+	if(enabledBackends.ReWire)
+	{
+		result.push_back(std::make_shared<DevicesEnumerator<CReWireDevice>>());
+	}
+#endif	// MPT_WITH_REWIRE
 	return result;
 }
 

@@ -3174,7 +3174,6 @@ void CViewPattern::OnPrevOrder()
 
 void CViewPattern::OnNextOrder()
 {
-	MPT_LOG(LogDebug, "View_pat", U_("NEXT ORDER CViewPattern:OnNextOrder() called"));
 	PostCtrlMessage(CTRLMSG_NEXTORDER);
 }
 

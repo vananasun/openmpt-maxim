@@ -12,13 +12,13 @@
 
 #include "stdafx.h"
 
-#include "SoundDevice.h"
-#include "SoundDeviceUtilities.h"
-#include "SoundDeviceReWire.h"
+#include "SoundDeviceReWire.hpp"
+#include "SoundDevice.hpp"
+#include "SoundDeviceUtilities.hpp"
+
 #include "../mptrack/rewire/MPTRewirePanel.h"
 
 #include "../common/misc_util.h"
-#include "../common/mptUUID.h"
 #include "../common/mptStringBuffer.h"
 #include "../mptrack/Reporting.h"
 #include "../mptrack/Mainfrm.h"
@@ -51,8 +51,8 @@ void PanelMixerQuitCallbackWrapper(void *userData) {
 
 
 
-CReWireDevice::CReWireDevice(SoundDevice::Info info, SoundDevice::SysInfo sysInfo)
-	: SoundDevice::Base(info, sysInfo)
+CReWireDevice::CReWireDevice(ILogger &logger, SoundDevice::Info info, SoundDevice::SysInfo sysInfo)
+	: SoundDevice::Base(logger, info, sysInfo)
 {
 	m_MasterBuffer = (void *)malloc(static_cast<size_t>(8192) * 2 * sizeof(float));
 	m_Panel = new MPTRewirePanel();
@@ -111,9 +111,9 @@ void CReWireDevice::InternalStop() {}
 void CReWireDevice::InternalFillAudioBuffer()
 {
 	m_FramesDoneDoubled = 0;
-	SourceLockedAudioReadPrepare(m_FramesToRender, 0);
-	SourceLockedAudioReadVoid(m_MasterBuffer, nullptr, m_FramesToRender);
-	SourceLockedAudioReadDone();
+	CallbackLockedAudioReadPrepare(m_FramesToRender, 0);
+	CallbackLockedAudioProcessVoid(m_MasterBuffer, nullptr, m_FramesToRender);
+	CallbackLockedAudioProcessDone();
 }
 
 int64 CReWireDevice::InternalGetStreamPositionFrames() const
@@ -184,7 +184,8 @@ bool CReWireDevice::OnIdle() {
 	return false;
 }
 
-std::vector<SoundDevice::Info> CReWireDevice::EnumerateDevices(SoundDevice::SysInfo sysInfo) {
+std::vector<SoundDevice::Info> CReWireDevice::EnumerateDevices(ILogger &logger, SoundDevice::SysInfo sysInfo) {
+	MPT_UNREFERENCED_PARAMETER(logger);
 	MPT_UNREFERENCED_PARAMETER(sysInfo);
 	std::vector<SoundDevice::Info> devices;
 	SoundDevice::Info info;
@@ -213,7 +214,7 @@ std::vector<SoundDevice::Info> CReWireDevice::EnumerateDevices(SoundDevice::SysI
 bool CReWireDevice::PanelStreamCallback(unsigned int framesToRender) {
 	if(!IsPlaying()) return false;
 	m_FramesToRender = framesToRender;
-	SourceFillAudioBufferLocked();
+	CallbackFillAudioBufferLocked();
 	return true;
 }
 

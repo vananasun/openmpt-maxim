@@ -606,7 +606,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
       <WarningLevel>Level4</WarningLevel>
-      <PreprocessorDefinitions>DEBUG;MPT_BUILD_DEBUG;MPT_BUILD_MSVC_STATIC;MPT_BUILD_MSVC;WIN32;_CRT_NONSTDC_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES_COUNT=1;_WIN32_WINNT=0x0A00;NTDDI_VERSION=0x0A000000;MPT_BUILD_ENABLE_PCH;MODPLUG_TRACKER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>DEBUG;MPT_BUILD_DEBUG;MPT_BUILD_MSVC_STATIC;MPT_BUILD_MSVC;WIN32;_CRT_NONSTDC_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES_COUNT=1;_WIN32_WINNT=0x0A00;NTDDI_VERSION=0x0A000000;MPT_BUILD_ENABLE_PCH;MODPLUG_TRACKER;WINDOWS;MPT_WITH_REWIRE;MPT_WITH_APC;NO_DSP;NO_REVERB;NO_EQ;NO_AGC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>..\..\include;..\..\include\ancient\api;..\..\include\asiomodern\include;..\..\include\ASIOSDK2\common;..\..\include\flac\include;..\..\include\lame\include;..\..\include\lhasa\lib\public;..\..\include\mpg123\ports\MSVC++;..\..\include\mpg123\src\libmpg123;..\..\include\nlohmann-json\include;..\..\include\ogg\include;..\..\include\opus\include;..\..\include\opusenc\include;..\..\include\opusfile\include;..\..\include\portaudio\include;..\..\include\rtaudio;..\..\include\vorbis\include;..\..\include\zlib;..\..\src;..\..\common;..\..\soundlib;$(IntDir)\svn_version;..\svn_version;..\pch;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>PCH.h</ForcedIncludeFiles>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
@@ -752,7 +752,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
       <WarningLevel>Level4</WarningLevel>
-      <PreprocessorDefinitions>NDEBUG;MPT_BUILD_MSVC_STATIC;MPT_BUILD_MSVC;WIN32;_CRT_NONSTDC_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES_COUNT=1;_WIN32_WINNT=0x0A00;NTDDI_VERSION=0x0A000000;MPT_BUILD_ENABLE_PCH;MODPLUG_TRACKER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;MPT_BUILD_MSVC_STATIC;MPT_BUILD_MSVC;WIN32;_CRT_NONSTDC_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES=1;_CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES_COUNT=1;_WIN32_WINNT=0x0A00;NTDDI_VERSION=0x0A000000;MPT_BUILD_ENABLE_PCH;MODPLUG_TRACKER;WINDOWS;MPT_WITH_REWIRE;MPT_WITH_APC;NO_DSP;NO_REVERB;NO_EQ;NO_AGC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>..\..\include;..\..\include\ancient\api;..\..\include\asiomodern\include;..\..\include\ASIOSDK2\common;..\..\include\flac\include;..\..\include\lame\include;..\..\include\lhasa\lib\public;..\..\include\mpg123\ports\MSVC++;..\..\include\mpg123\src\libmpg123;..\..\include\nlohmann-json\include;..\..\include\ogg\include;..\..\include\opus\include;..\..\include\opusenc\include;..\..\include\opusfile\include;..\..\include\portaudio\include;..\..\include\rtaudio;..\..\include\vorbis\include;..\..\include\zlib;..\..\src;..\..\common;..\..\soundlib;$(IntDir)\svn_version;..\svn_version;..\pch;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>PCH.h</ForcedIncludeFiles>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
@@ -1611,9 +1611,7 @@
     <ClInclude Include="..\..\mptrack\rewire\MPTRewirePanel.h" />
     <ClInclude Include="..\..\mptrack\rewire\ReWire.h" />
     <ClInclude Include="..\..\mptrack\rewire\ReWireAPI.h" />
-    <ClInclude Include="..\..\mptrack\rewire\ReWireDeviceAPI.h" />
     <ClInclude Include="..\..\mptrack\rewire\ReWirePanelAPI.h" />
-    <ClInclude Include="..\..\mptrack\rewire\RWDEFAPI.h" />
     <ClInclude Include="..\..\mptrack\SampleConfigDlg.h" />
     <ClInclude Include="..\..\mptrack\SampleEditorDialogs.h" />
     <ClInclude Include="..\..\mptrack\SampleGenerator.h" />
@@ -1904,6 +1902,7 @@
     <ClInclude Include="..\..\src\openmpt\sounddevice\SoundDevicePortAudio.hpp" />
     <ClInclude Include="..\..\src\openmpt\sounddevice\SoundDevicePulseSimple.hpp" />
     <ClInclude Include="..\..\src\openmpt\sounddevice\SoundDevicePulseaudio.hpp" />
+    <ClInclude Include="..\..\src\openmpt\sounddevice\SoundDeviceReWire.hpp" />
     <ClInclude Include="..\..\src\openmpt\sounddevice\SoundDeviceRtAudio.hpp" />
     <ClInclude Include="..\..\src\openmpt\sounddevice\SoundDeviceUtilities.hpp" />
     <ClInclude Include="..\..\src\openmpt\sounddevice\SoundDeviceWaveout.hpp" />
@@ -2021,11 +2020,9 @@
     <ClCompile Include="..\..\mptrack\Reporting.cpp" />
     <ClCompile Include="..\..\mptrack\ResizableDialog.cpp" />
     <ClCompile Include="..\..\mptrack\rewire\MPTRewireDebugUtils.cpp" />
-    <ClCompile Include="..\..\mptrack\rewire\MPTRewireDevice.cpp" />
     <ClCompile Include="..\..\mptrack\rewire\MPTRewirePanel.cpp" />
     <ClCompile Include="..\..\mptrack\rewire\ReWire.cpp" />
     <ClCompile Include="..\..\mptrack\rewire\ReWireAPI.cpp" />
-    <ClCompile Include="..\..\mptrack\rewire\ReWireDeviceAPI.cpp" />
     <ClCompile Include="..\..\mptrack\rewire\ReWirePanelAPI.cpp" />
     <ClCompile Include="..\..\mptrack\SampleConfigDlg.cpp" />
     <ClCompile Include="..\..\mptrack\SampleEditorDialogs.cpp" />
@@ -2188,6 +2185,7 @@
     <ClCompile Include="..\..\src\openmpt\sounddevice\SoundDevicePortAudio.cpp" />
     <ClCompile Include="..\..\src\openmpt\sounddevice\SoundDevicePulseSimple.cpp" />
     <ClCompile Include="..\..\src\openmpt\sounddevice\SoundDevicePulseaudio.cpp" />
+    <ClCompile Include="..\..\src\openmpt\sounddevice\SoundDeviceReWire.cpp" />
     <ClCompile Include="..\..\src\openmpt\sounddevice\SoundDeviceRtAudio.cpp" />
     <ClCompile Include="..\..\src\openmpt\sounddevice\SoundDeviceUtilities.cpp" />
     <ClCompile Include="..\..\src\openmpt\sounddevice\SoundDeviceWaveout.cpp" />

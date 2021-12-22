@@ -10,10 +10,10 @@
 
 #pragma once
 
-#include "BuildSettings.h"
+#include "openmpt/all/BuildSettings.hpp"
 
-#include "SoundDeviceBase.h"
-#include "SoundDeviceUtilities.h"
+#include "SoundDevice.hpp"
+#include "SoundDeviceUtilities.hpp"
 
 #include "../common/ComponentManager.h"
 
@@ -64,7 +64,7 @@ public:
 
 
 
-	CReWireDevice(SoundDevice::Info info, SoundDevice::SysInfo sysInfo);
+	CReWireDevice(ILogger &logger, SoundDevice::Info info, SoundDevice::SysInfo sysInfo);
 	~CReWireDevice();
 	
 	bool InternalOpen();
@@ -81,8 +81,9 @@ public:
 	SoundDevice::DynamicCaps GetDeviceDynamicCaps(const std::vector<uint32> &baseSampleRates);
 	bool OpenDriverSettings();
 	bool OnIdle();
-
-	static std::vector<SoundDevice::Info> EnumerateDevices(SoundDevice::SysInfo sysInfo);
+	
+	static std::unique_ptr<SoundDevice::BackendInitializer> BackendInitializer() { return std::make_unique<SoundDevice::BackendInitializer>(); }
+	static std::vector<SoundDevice::Info> EnumerateDevices(ILogger &logger, SoundDevice::SysInfo sysInfo);
 
 	bool PanelStreamCallback(unsigned int framesToRender);
 	void PanelAudioInfoCallback(int sampleRate, int maxBufferSize);

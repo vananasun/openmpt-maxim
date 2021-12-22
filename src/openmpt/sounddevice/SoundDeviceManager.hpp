@@ -50,6 +50,9 @@ struct EnabledBackends
 #ifdef MPT_WITH_RTAUDIO
 	bool RtAudio = true;
 #endif  // MPT_WITH_RTAUDIO
+#ifdef MPT_WITH_REWIRE
+	bool ReWire = true;
+#endif
 };
 
 

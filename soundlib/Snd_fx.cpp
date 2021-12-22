@@ -29,7 +29,7 @@
 #include "MIDIEvents.h"
 #ifdef MPT_WITH_REWIRE
 #include "../mptrack/Mainfrm.h"
-#include "../sounddev/SoundDeviceReWire.h"
+#include "openmpt/sounddevice/SoundDeviceReWire.hpp"
 #endif
 
 OPENMPT_NAMESPACE_BEGIN
@@ -1976,7 +1976,6 @@ void CSoundFile::NoteChange(ModChannel &chn, int note, bool bPorta, bool bResetE
 			if(cutoff >= 0 && chn.dwFlags[CHN_ADLIB] && m_opl && channelHint != CHANNELINDEX_INVALID)
 				m_opl->Volume(channelHint, chn.nCutOff / 2u, true);
 		}
-	}
 
 		if(chn.dwFlags[CHN_ADLIB] && m_opl && channelHint != CHANNELINDEX_INVALID)
 		{
