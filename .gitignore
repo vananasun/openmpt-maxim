@@ -801,3 +801,6 @@
 /test/test.saved.xm
 /unarchiver/*.d
 /unarchiver/*.o
+.vs
+.vscode
+.idea
